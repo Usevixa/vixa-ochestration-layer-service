@@ -1,0 +1,90 @@
+{
+  "screens": [
+    {
+      "data": {},
+      "id": "RECOMMEND",
+      "layout": {
+        "children": [
+          {
+            "children": [
+              {
+                "text": "Input your details to get started",
+                "type": "TextSubheading"
+              },
+              {
+                "input-type": "text",
+                "label": "First Name",
+                "name": "First_Name_4f74a5",
+                "required": true,
+                "type": "TextInput"
+              },
+              {
+                "input-type": "text",
+                "label": "Last Name",
+                "name": "Last_Name_76477c",
+                "required": true,
+                "type": "TextInput"
+              },
+              {
+                "input-type": "text",
+                "label": "NIN",
+                "name": "NIN_309570",
+                "required": true,
+                "type": "TextInput"
+              },
+              {
+                "label": "Date Of Birth",
+                "name": "Date_Of_Birth_a93dfa",
+                "required": true,
+                "type": "DatePicker"
+              },
+              {
+                "input-type": "passcode",
+                "label": "Pin",
+                "name": "Pin_a67573",
+                "required": true,
+                "type": "TextInput"
+              },
+              {
+                "input-type": "passcode",
+                "label": "Confirm Pin",
+                "name": "Confirm_Pin_2db2be",
+                "required": true,
+                "type": "TextInput"
+              },
+              {
+                "input-type": "email",
+                "label": "Email",
+                "name": "Email_8fa5bf",
+                "required": true,
+                "type": "TextInput"
+              },
+              {
+                "label": "Submit",
+                "on-click-action": {
+                  "name": "complete",
+                  "payload": {
+                    "screen_0_First_Name_0": "${form.First_Name_4f74a5}",
+                    "screen_0_Last_Name_1": "${form.Last_Name_76477c}",
+                    "screen_0_NIN_2": "${form.NIN_309570}",
+                    "screen_0_Date_Of_Birth_3": "${form.Date_Of_Birth_a93dfa}",
+                    "screen_0_Pin_4": "${form.Pin_a67573}",
+                    "screen_0_Confirm_Pin_5": "${form.Confirm_Pin_2db2be}",
+                    "screen_0_Email_6": "${form.Email_8fa5bf}"
+                  }
+                },
+                "type": "Footer"
+              }
+            ],
+            "name": "flow_path",
+            "type": "Form"
+          }
+        ],
+        "type": "SingleColumnLayout"
+      },
+      "terminal": true,
+      "title": "Vixa Onboarding"
+    }
+  ],
+  "version": "7.2"
+}
