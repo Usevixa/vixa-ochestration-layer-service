@@ -24,6 +24,8 @@ export async function fetchSwapCurrencies() {
       headers: { Authorization: `Bearer ${token}` },
     });
 
+    console.log('fetching swap currencies', res)
+
     return { success: true, data: res.data };
   } catch (err) {
     console.error("fetchSwapCurrencies ERROR:", err?.response?.data || err?.message);

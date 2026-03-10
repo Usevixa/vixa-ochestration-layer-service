@@ -32,6 +32,8 @@ export async function fetchBanks() {
       httpsAgent,
       headers: { Authorization: `Bearer ${token}` },
     });
+
+    console.log('fetching banks', res)
     return { success: true, data: res.data.data };
   } catch (error) {
     console.error("Fetch Banks Error:", error?.response?.data || error.message);

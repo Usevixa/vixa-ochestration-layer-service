@@ -33,7 +33,7 @@ export async function fetchRates({
             }
         );
 
-        console.log("rates RESPONSE:", res);
+       console.log(res, 'supplying recent rates')
 
         return { success: true, data: res.data };
     } catch (err) {

@@ -17,6 +17,8 @@ export async function fetchWalletBalances(coin = "") {
       }
     );
 
+    console.log("fetching wallet Balances", res);
+
     /**
      * Expected response shape:
      * {

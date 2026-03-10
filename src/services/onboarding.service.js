@@ -28,7 +28,7 @@ export async function createUserOnboarding({
       pin, // change to pinHash if API expects hashed
     };
 
-    console.log(body,'onobarding body')
+   console.log(body, 'onboarding payload')
     const res = await axios.post(`${VIXA_API_BASE}/onboarding/users`, body, {
       timeout: 15000,
       headers: { "Content-Type": "application/json" },

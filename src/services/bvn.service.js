@@ -21,7 +21,7 @@ export async function verifyBVN({ bvn, firstName, lastName }) {
       throw new Error("Missing auth token for NIN verification");
     }
 
-    console.log("Verifying NIN with:", {
+    console.log("Verifying BVN with:", {
       ...payload,
       token,
     });

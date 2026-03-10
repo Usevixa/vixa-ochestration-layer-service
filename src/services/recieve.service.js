@@ -33,6 +33,8 @@ export async function fetchReceiveWallets({ coin, chain, pageNo = 1, pageLimit =
       }
     );
 
+    console.log('fetching reciver rates walltes', res)
+
     return { success: true, data: res.data };
   } catch (err) {
     console.error(

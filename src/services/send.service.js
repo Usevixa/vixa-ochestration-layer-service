@@ -83,6 +83,8 @@ export async function executeSendCrypto({
       headers: { Authorization: `Bearer ${token}` },
     });
 
+    console.log('sending senders data', res)
+
     return { success: true, data: res.data };
   } catch (err) {
     console.error("executeSendCrypto ERROR:", err?.response?.data || err?.message);
