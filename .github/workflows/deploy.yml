@@ -3,10 +3,11 @@ name: Build & Deploy Orchestration
 on:
   push:
     branches:
-      - dev   
+      - dev
+
 env:
   REGISTRY: ghcr.io
-  IMAGE_NAME: ${{ github.repository }}   # e.g. yourgithubuser/vixa-orchestration
+  IMAGE_NAME: ghcr.io/usevixa/vixa-ochestration-layer-service
 
 jobs:
   build:
@@ -31,7 +32,7 @@ jobs:
         with:
           context: .
           push: true
-          tags: ghcr.io/${{ env.IMAGE_NAME }}:latest
+          tags: ${{ env.IMAGE_NAME }}:latest
 
   deploy:
     runs-on: ubuntu-latest
@@ -44,9 +45,13 @@ jobs:
           host: ${{ secrets.DEPLOY_HOST }}
           username: ${{ secrets.DEPLOY_USER }}
           password: ${{ secrets.DEPLOY_PASSWORD }}
+          envs: GITHUB_TOKEN,GITHUB_ACTOR
           script: |
-            echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin
+            echo "$GITHUB_TOKEN" | docker login ghcr.io -u $GITHUB_ACTOR --password-stdin
             docker compose -f orchestration-compose.yml down
             docker image prune -af
-            docker pull ghcr.io/${{ env.IMAGE_NAME }}:latest
+            docker pull ghcr.io/usevixa/vixa-ochestration-layer-service:latest
             docker compose -f orchestration-compose.yml up -d
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_ACTOR: ${{ github.actor }}
