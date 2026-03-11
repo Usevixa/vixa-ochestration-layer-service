@@ -1,3 +1,4 @@
+# Use the official Node.js 20 LTS image
 FROM node:20-slim
 
 WORKDIR /usr/src/app
@@ -8,8 +9,6 @@ RUN npm install --omit=dev
 
 COPY . .
 
-RUN npm run build
-
 EXPOSE 3000
 
-CMD [ "node", "dist/index.js" ]
+CMD [ "node", "index.js" ]
