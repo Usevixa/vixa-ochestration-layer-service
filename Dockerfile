@@ -7,7 +7,6 @@ WORKDIR /usr/src/app
 # Install app dependencies
 COPY package*.json ./
 
-# Install only production dependencies
 RUN npm install --omit=dev
 
 # Bundle app source (Copies everything including the 'src' folder)
