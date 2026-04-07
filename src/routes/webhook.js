@@ -37,7 +37,7 @@ const WHATSAPP_TOKEN =
   "EAAYMlHAusnwBQ45v9SxUD0ZAROdQwXrgaW5ZA98MkNGYfuLo376qvtgHFgIcUkDC3vVZBZBpRRk6PmVuHMEdyBMTvs7DxZCg5iEnr4DM3KF9SbiMqtHZAiJJmSGhesmnYuxaZAbAGObPoZBY4MI8XsdqgMjPnpCkZBAO1M2HVfBZBXkRZAfRSZCktLh6acW9R1ThqJ6gcSEmWqEvT62H49R4AHQt06iOgxbw8DiZCxE5JYVbO3AMZA9rSWCLK2oIHxs9AeU1wF3K8UePwWIMZAm1EhwvpfiIijI2ZCdz3O7HhwZDZD";
 const VERIFY_TOKEN = process.env.WHATSAPP_VERIFY_TOKEN;
 const FLOW_ID = "1305487421330010";
-const WHATSAPP_API_VERSION = "v24.0";
+const WHATSAPP_API_VERSION = "v25.0";
 
 function formatDobToISO(dob) {
   if (!dob) return null;
@@ -2683,7 +2683,7 @@ async function sendMainMenu(to, phone_number_id) {
 
 /* ------------- helper to trigger the Flow ------------- */
 async function triggerFlow(toPhone, phone_number_id) {
-  if (!WHATSAPP_TOKEN || !phone_number_id) {
+  if (!process.envWHATSAPP_TOKEN || !phone_number_id) {
     console.log(
       "[MOCK send] to:",
       toPhone,
@@ -2719,7 +2719,7 @@ async function triggerFlow(toPhone, phone_number_id) {
   const res = await fetch(url, {
     method: "POST",
     headers: {
-      Authorization: `Bearer ${WHATSAPP_TOKEN}`,
+      Authorization: `Bearer ${process.env.WHATSAPP_TOKEN}`,
       "Content-Type": "application/json",
     },
     body: JSON.stringify(body),
@@ -2736,7 +2736,7 @@ async function triggerFlow(toPhone, phone_number_id) {
 
 /* ------------- WA send helper (text + interactive) ------------- */
 async function sendWhatsApp(to, message, phone_number_id) {
-  if (!WHATSAPP_TOKEN || !phone_number_id) {
+  if (!process.env.WHATSAPP_TOKEN || !phone_number_id) {
     console.log(
       "[MOCK send] to:",
       to,
@@ -2762,7 +2762,7 @@ async function sendWhatsApp(to, message, phone_number_id) {
   const res = await fetch(url, {
     method: "POST",
     headers: {
-      Authorization: `Bearer ${WHATSAPP_TOKEN}`,
+      Authorization: `Bearer ${process.env.WHATSAPP_TOKEN}`,
       "Content-Type": "application/json",
     },
     body: JSON.stringify(body),
