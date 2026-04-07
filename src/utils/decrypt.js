@@ -4,7 +4,11 @@ import crypto from "crypto";
 // --- Configuration ---
 // IMPORTANT: Ensure this path or environment variable is correct.
 // If running locally, make sure 'private.pem' is in the root directory.
-const PRIVATE_KEY = fs.readFileSync("./private.pem", "utf8"); 
+const PRIVATE_KEY  = process.env.PRIVATE_KEY;
+
+if (!PRIVATE_KEY) {
+  throw new Error("PRIVATE_KEY environment variable is not set.");
+}
 
 // --- Core Decryption Function ---
 export const decryptRequest = (body) => {

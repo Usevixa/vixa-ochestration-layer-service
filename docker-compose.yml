@@ -1,4 +1,5 @@
 version: '3.8'
+
 services:
   app:
     build: .
@@ -8,4 +9,7 @@ services:
       - .env
     volumes:
       - ./private.pem:/usr/src/app/private.pem
+      # Optional: Add this line if you want "Hot Reload" during development
+      # - .:/usr/src/app
+      # - /usr/src/app/node_modules
     restart: always
