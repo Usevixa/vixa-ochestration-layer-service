@@ -4,7 +4,13 @@ import crypto from "crypto";
 // --- Configuration ---
 // IMPORTANT: Ensure this path or environment variable is correct.
 // If running locally, make sure 'private.pem' is in the root directory.
-const PRIVATE_KEY  = process.env.PRIVATE_KEY;
+
+const rawEnvKey = process.env.PRIVATE_KEY;
+if (!rawEnvKey) {
+  throw new Error("PRIVATE_KEY environment variable is not set.");
+}
+
+const PRIVATE_KEY = Buffer.from(rawEnvKey, 'base64').toString('utf-8');
 
 if (!PRIVATE_KEY) {
   throw new Error("PRIVATE_KEY environment variable is not set.");
