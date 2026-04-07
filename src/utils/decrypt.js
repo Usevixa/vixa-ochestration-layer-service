@@ -1,14 +1,10 @@
-import fs from "fs";
 import crypto from "crypto";
 
 // --- Configuration ---
 // IMPORTANT: Ensure this path or environment variable is correct.
 // If running locally, make sure 'private.pem' is in the root directory.
 
-// const rawEnvKey = process.env.PRIVATE_KEY;
-// if (!rawEnvKey) {
-//   throw new Error("PRIVATE_KEY environment variable is not set.");
-// }
+
 
 const PRIVATE_KEY = process.env.PRIVATE_KEY;
 
