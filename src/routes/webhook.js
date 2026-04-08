@@ -34,7 +34,7 @@ const router = express.Router();
 
 // Environment configuration (Replace with environment variables in production)
 const WHATSAPP_TOKEN =
-  "EAAYMlHAusnwBQ45v9SxUD0ZAROdQwXrgaW5ZA98MkNGYfuLo376qvtgHFgIcUkDC3vVZBZBpRRk6PmVuHMEdyBMTvs7DxZCg5iEnr4DM3KF9SbiMqtHZAiJJmSGhesmnYuxaZAbAGObPoZBY4MI8XsdqgMjPnpCkZBAO1M2HVfBZBXkRZAfRSZCktLh6acW9R1ThqJ6gcSEmWqEvT62H49R4AHQt06iOgxbw8DiZCxE5JYVbO3AMZA9rSWCLK2oIHxs9AeU1wF3K8UePwWIMZAm1EhwvpfiIijI2ZCdz3O7HhwZDZD";
+  "EAAYMlHAusnwBRCZCLncwZCTsSk4lZAGHx4ZCmwtsbAkDbCRYohvNYwWKqp6bf8acZBZBQrIhpe1vuU02Tf6yKgEkhNN7LE21BnMjB4VTj419c2NKVQPOnF2OfXCeP73ilzhfs2NjKHfM99K5Mzgjo0YGDilN4FxU8kbOTB7uZAEZBS1NkhEE4dQ6spuYJDY8EFkqZBMzoc10rVmk8UUE5D6aGFUoiGzIJNo3yFLGwLvQ3seAHPxQ2whgQLA6VuYaaFnhyt14CCy6xYLghIqEh1YeE6Rj9iMHOl7AkMAZDZD";
 const VERIFY_TOKEN = process.env.WHATSAPP_VERIFY_TOKEN;
 const FLOW_ID = "1462140848896803";
 const WHATSAPP_API_VERSION = "v25.0";
@@ -2684,7 +2684,7 @@ async function sendMainMenu(to, phone_number_id) {
 
 /* ------------- helper to trigger the Flow ------------- */
 async function triggerFlow(toPhone, phone_number_id) {
-  if (!process.envWHATSAPP_TOKEN || !phone_number_id) {
+  if (!WHATSAPP_TOKEN || !phone_number_id) {
     console.log(
       "[MOCK send] to:",
       toPhone,
@@ -2720,7 +2720,7 @@ async function triggerFlow(toPhone, phone_number_id) {
   const res = await fetch(url, {
     method: "POST",
     headers: {
-      Authorization: `Bearer ${process.env.WHATSAPP_TOKEN}`,
+      Authorization: `Bearer ${WHATSAPP_TOKEN}`,
       "Content-Type": "application/json",
     },
     body: JSON.stringify(body),
@@ -2738,7 +2738,7 @@ async function triggerFlow(toPhone, phone_number_id) {
 /* ------------- WA send helper (text + interactive) ------------- */
 async function sendWhatsApp(to, message, phone_number_id) {
   console.log("got here but could not send message becacuse whatsapp token is missing")
-  if (!process.env.WHATSAPP_TOKEN || !phone_number_id) {
+  if (!WHATSAPP_TOKEN || !phone_number_id) {
     console.log(
       "[MOCK send] to:",
       to,
@@ -2764,7 +2764,7 @@ async function sendWhatsApp(to, message, phone_number_id) {
   const res = await fetch(url, {
     method: "POST",
     headers: {
-      Authorization: `Bearer ${process.env.WHATSAPP_TOKEN}`,
+      Authorization: `Bearer ${WHATSAPP_TOKEN}`,
       "Content-Type": "application/json",
     },
     body: JSON.stringify(body),
