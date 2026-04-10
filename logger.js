@@ -1,17 +1,17 @@
-const winston = require('winston');
-require('winston-seq-updated');
+import winston from "winston";
+import seq from "winston-seq-updated";
+
+const SeqTransport = seq.default || seq;
 
 const logger = winston.createLogger({
-  level: 'info',
+  level: "info",
   transports: [
     new winston.transports.Console(),
-
-    new winston.transports.Seq({
-      serverUrl: 'https://seq.usevixa.com',
-      apiKey: 'OHHfwZvuzymWm2oh1lYJ', // <-- important
-      onError: (e) => console.error('SEQ error:', e)
+    new SeqTransport({
+      serverUrl: "https://seq.usevixa.com",
+      apiKey: "OHHfwZvuzymWm2oh1lYJ"
     })
   ]
 });
 
-module.exports = logger;
+export default logger;

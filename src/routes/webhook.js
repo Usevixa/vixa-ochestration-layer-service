@@ -1,5 +1,5 @@
 import express from "express";
-const logger = require("./logger");
+import logger from "../../logger.js";
 import { getSession, updateSession } from "../services/session.service.js";
 import { createUserOnboarding } from "../services/onboarding.service.js";
 import { verifyNIN } from "../services/kyc.service.js";
