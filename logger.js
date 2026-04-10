@@ -8,7 +8,7 @@ const logger = winston.createLogger({
 
     new winston.transports.Seq({
       serverUrl: 'https://seq.usevixa.com',
-      apiKey: 'PASTE_YOUR_API_KEY_HERE', // <-- important
+      apiKey: 'OHHfwZvuzymWm2oh1lYJ', // <-- important
       onError: (e) => console.error('SEQ error:', e)
     })
   ]
