@@ -1,4 +1,5 @@
 import express from "express";
+const logger = require("./logger");
 import { getSession, updateSession } from "../services/session.service.js";
 import { createUserOnboarding } from "../services/onboarding.service.js";
 import { verifyNIN } from "../services/kyc.service.js";
@@ -116,7 +117,7 @@ router.get("/callback", (req, res) => {
 
 /* ------------- main webhook for incoming WhatsApp events (FIXED FOR FLOW SUBMISSION) ------------- */
 router.post("/callback", async (req, res) => {
-  console.log("webhook hit successfully")
+  console.log("webhook hit successfully");
   // Acknowledge immediately to Meta
   res.sendStatus(200);
 
@@ -1185,6 +1186,7 @@ router.post("/callback", async (req, res) => {
             );
 
             console.log("starts from here!!!");
+            logger.info("starts from here!!!");
 
             console.log(session, " store house");
 
@@ -2167,6 +2169,7 @@ async function processFlowCompletion(phone, phone_number_id, form) {
   const confirmPin = form.screen_0_Confirm_Pin_7;
 
   console.log("Extracted Onboarding Data:", { firstName, lastName, nin });
+  logger.info({ firstName, lastName, nin });
 
   // Basic validation
   if (
@@ -2201,6 +2204,8 @@ async function processFlowCompletion(phone, phone_number_id, form) {
       email,
       pin,
     });
+
+      logger.info(createRes);
 
     if (!createRes.success) {
       await sendWhatsApp(
@@ -2737,7 +2742,9 @@ async function triggerFlow(toPhone, phone_number_id) {
 
 /* ------------- WA send helper (text + interactive) ------------- */
 async function sendWhatsApp(to, message, phone_number_id) {
-  console.log("got here but could not send message becacuse whatsapp token is missing")
+  console.log(
+    "got here but could not send message becacuse whatsapp token is missing",
+  );
   if (!WHATSAPP_TOKEN || !phone_number_id) {
     console.log(
       "[MOCK send] to:",
