@@ -10,6 +10,9 @@ import { fetchWalletBalances } from "../services/wallet.service.js";
 import { fetchReceiveWallets } from "../services/recieve.service.js";
 import { analyzeUserIntent } from "../services/ai.service.js";
 import {
+  isSessionTokenValid,
+} from "../services/auth.service.js";
+import {
   fetchSwapCurrencies,
   fetchSwapQuote,
   executeSwap,
@@ -103,6 +106,69 @@ function pickPreferredToCoins(allCurrencies, preferredList, fromCoin) {
 //   return true;
 // }
 
+// Near the top of your webhook router, after your imports
+
+// async function withAuthGuard(from, phone_number_id, action) {
+//   const session = await getSession(from);
+
+//   // 1. Check token validity before even attempting the action
+//   if (!isSessionTokenValid(session.data)) {
+//     console.warn(`Token expired or missing for ${from}. Prompting re-login.`);
+
+//     await updateSession(from, {
+//       data: {
+//         ...session.data,
+//         token: null,
+//         tokenExpiresAt: null,
+//         authenticated: false,
+//         awaitingPin: true,
+//         pinAttempts: 0,
+//       },
+//     });
+
+//     await sendWhatsApp(
+//       from,
+//       "🔒 Your session has expired. Please enter your *4-digit PIN* to continue.",
+//       phone_number_id,
+//     );
+//     return false;
+//   }
+
+//   // 2. Run the action, catch any surprise 401s the server sends back
+//   try {
+//     await action(session);
+//     return true;
+//   } catch (err) {
+//     const is401 =
+//       err?.response?.status === 401 ||
+//       err?.message?.toLowerCase().includes("unauthorized");
+
+//     if (is401) {
+//       console.warn(`401 received mid-action for ${from}. Prompting re-login.`);
+
+//       await updateSession(from, {
+//         data: {
+//           ...session.data,
+//           token: null,
+//           tokenExpiresAt: null,
+//           authenticated: false,
+//           awaitingPin: true,
+//           pinAttempts: 0,
+//         },
+//       });
+
+//       await sendWhatsApp(
+//         from,
+//         "🔒 Your session has expired. Please enter your *4-digit PIN* to continue.",
+//         phone_number_id,
+//       );
+//       return false;
+//     }
+
+//     throw err; // anything else, let it bubble up normally
+//   }
+// }
+
 /* ------------- verification for Meta webhook ------------- */
 router.get("/callback", (req, res) => {
   const mode = req.query["hub.mode"];
@@ -151,6 +217,33 @@ router.post("/callback", async (req, res) => {
           });
 
           // --- FIX: Detect and process Flow Submission (nfm_reply) ---
+
+          if (
+            session.data?.authenticated &&
+            !isSessionTokenValid(session.data)
+          ) {
+            console.warn(`Token expired for ${from} — forcing re-login`);
+
+            await updateSession(from, {
+              data: {
+                ...session.data, // preserve ALL flow state intact
+                token: null,
+                tokenExpiresAt: null,
+                authenticated: false,
+                awaitingPin: true,
+                pinAttempts: 0,
+              },
+            });
+
+            await sendWhatsApp(
+              from,
+              "🔒 Your session has expired. Please enter your *4-digit PIN* to continue.",
+              phone_number_id,
+            );
+
+            continue; // skip nfm_reply, list_reply, button_reply, text — everything
+          }
+
           if (
             msg.type === "interactive" &&
             msg.interactive?.type === "nfm_reply"
@@ -2201,7 +2294,6 @@ async function processFlowCompletion(phone, phone_number_id, form) {
       email,
       pin,
     });
-
 
     if (!createRes.success) {
       await sendWhatsApp(

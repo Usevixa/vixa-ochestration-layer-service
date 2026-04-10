@@ -1,7 +1,9 @@
 // services/auth.service.js
 import axios from "axios";
+import { getSession, updateSession } from "./session.service.js";
 
-const VIXA_API_BASE = process.env.VIXA_API_BASE || "https://api.usevixa.com/api/v1";
+const VIXA_API_BASE =
+  process.env.VIXA_API_BASE || "https://api.usevixa.com/api/v1";
 
 let cachedToken = null;
 let tokenExpiresAt = null;
@@ -11,8 +13,7 @@ let tokenExpiresAt = null;
  * Logs the user in and caches accessToken for subsequent API calls.
  */
 export async function loginUser({ phoneNumber, pin, deviceId = "" }) {
-
-  console.log(phoneNumber, pin, deviceId,'phoneNumber, pin, deviceId')
+  console.log(phoneNumber, pin, deviceId, "phoneNumber, pin, deviceId");
   try {
     const res = await axios.post(`${VIXA_API_BASE}/auth/login`, {
       phoneNumber,
@@ -27,13 +28,26 @@ export async function loginUser({ phoneNumber, pin, deviceId = "" }) {
       throw new Error("No access token returned from auth service");
     }
 
-    cachedToken = token;
-    tokenExpiresAt = Date.now() + (expiresIn - 300) * 1000; // subtract 5 minutes as buffer
+    await updateSession(phoneNumber, {
+      data: {
+        token,
+        pin, // cache pin for re-auth prompting
+        tokenExpiresAt: Date.now() + (expiresIn - 300) * 1000,
+        authenticated: true,
+        awaitingPin: false,
+      },
+    });
     return token;
   } catch (err) {
     console.error("loginUser ERROR:", err?.response?.data || err.message);
     throw err;
   }
+}
+
+export function isSessionTokenValid(sessionData) {
+  if (!sessionData?.token) return false;
+  if (!sessionData?.tokenExpiresAt) return false;
+  return Date.now() < sessionData.tokenExpiresAt;
 }
 
 export async function verifyUserToken() {
@@ -53,7 +67,6 @@ export function getToken() {
   return cachedToken;
 }
 
-
 // services/auth.service.js
 export async function checkPhoneNumber(phoneNumber) {
   try {
@@ -64,7 +77,10 @@ export async function checkPhoneNumber(phoneNumber) {
     // returns true if user exists, false otherwise
     return res.data?.data;
   } catch (err) {
-    console.error("checkPhoneNumber ERROR:", err?.response?.data || err.message);
+    console.error(
+      "checkPhoneNumber ERROR:",
+      err?.response?.data || err.message,
+    );
     throw err;
   }
 }
