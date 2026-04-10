@@ -28,6 +28,9 @@ export async function loginUser({ phoneNumber, pin, deviceId = "" }) {
       throw new Error("No access token returned from auth service");
     }
 
+    cachedToken = token;
+    tokenExpiresAt = Date.now() + (expiresIn - 300) * 1000;
+    
     await updateSession(phoneNumber, {
       data: {
         token,
