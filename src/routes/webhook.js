@@ -1,5 +1,4 @@
 import express from "express";
-import logger from "../../logger.js";
 import { getSession, updateSession } from "../services/session.service.js";
 import { createUserOnboarding } from "../services/onboarding.service.js";
 import { verifyNIN } from "../services/kyc.service.js";
@@ -1186,7 +1185,6 @@ router.post("/callback", async (req, res) => {
             );
 
             console.log("starts from here!!!");
-            logger.info("starts from here!!!");
 
             console.log(session, " store house");
 
@@ -2169,7 +2167,6 @@ async function processFlowCompletion(phone, phone_number_id, form) {
   const confirmPin = form.screen_0_Confirm_Pin_7;
 
   console.log("Extracted Onboarding Data:", { firstName, lastName, nin });
-  logger.info({ firstName, lastName, nin });
 
   // Basic validation
   if (
@@ -2205,7 +2202,6 @@ async function processFlowCompletion(phone, phone_number_id, form) {
       pin,
     });
 
-      logger.info(createRes);
 
     if (!createRes.success) {
       await sendWhatsApp(
