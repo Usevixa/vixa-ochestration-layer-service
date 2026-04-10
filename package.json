@@ -18,7 +18,9 @@
     "dotenv": "^17.2.3",
     "express": "^5.1.0",
     "ngrok": "^5.0.0-beta.2",
-    "openai": "^6.7.0"
+    "openai": "^6.7.0",
+    "winston": "^3.19.0",
+    "winston-seq-updated": "^1.0.4"
   },
   "devDependencies": {
     "nodemon": "^3.1.10"
