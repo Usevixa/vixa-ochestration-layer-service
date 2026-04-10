@@ -9,9 +9,7 @@ import { depositCrypto } from "../services/deposit.service.js";
 import { fetchWalletBalances } from "../services/wallet.service.js";
 import { fetchReceiveWallets } from "../services/recieve.service.js";
 import { analyzeUserIntent } from "../services/ai.service.js";
-import {
-  isSessionTokenValid,
-} from "../services/auth.service.js";
+import { isSessionTokenValid } from "../services/auth.service.js";
 import {
   fetchSwapCurrencies,
   fetchSwapQuote,
@@ -106,69 +104,6 @@ function pickPreferredToCoins(allCurrencies, preferredList, fromCoin) {
 //   return true;
 // }
 
-// Near the top of your webhook router, after your imports
-
-// async function withAuthGuard(from, phone_number_id, action) {
-//   const session = await getSession(from);
-
-//   // 1. Check token validity before even attempting the action
-//   if (!isSessionTokenValid(session.data)) {
-//     console.warn(`Token expired or missing for ${from}. Prompting re-login.`);
-
-//     await updateSession(from, {
-//       data: {
-//         ...session.data,
-//         token: null,
-//         tokenExpiresAt: null,
-//         authenticated: false,
-//         awaitingPin: true,
-//         pinAttempts: 0,
-//       },
-//     });
-
-//     await sendWhatsApp(
-//       from,
-//       "🔒 Your session has expired. Please enter your *4-digit PIN* to continue.",
-//       phone_number_id,
-//     );
-//     return false;
-//   }
-
-//   // 2. Run the action, catch any surprise 401s the server sends back
-//   try {
-//     await action(session);
-//     return true;
-//   } catch (err) {
-//     const is401 =
-//       err?.response?.status === 401 ||
-//       err?.message?.toLowerCase().includes("unauthorized");
-
-//     if (is401) {
-//       console.warn(`401 received mid-action for ${from}. Prompting re-login.`);
-
-//       await updateSession(from, {
-//         data: {
-//           ...session.data,
-//           token: null,
-//           tokenExpiresAt: null,
-//           authenticated: false,
-//           awaitingPin: true,
-//           pinAttempts: 0,
-//         },
-//       });
-
-//       await sendWhatsApp(
-//         from,
-//         "🔒 Your session has expired. Please enter your *4-digit PIN* to continue.",
-//         phone_number_id,
-//       );
-//       return false;
-//     }
-
-//     throw err; // anything else, let it bubble up normally
-//   }
-// }
-
 /* ------------- verification for Meta webhook ------------- */
 router.get("/callback", (req, res) => {
   const mode = req.query["hub.mode"];
@@ -216,34 +151,42 @@ router.post("/callback", async (req, res) => {
             data: { ...(session.data || {}), phone_number_id },
           });
 
-          // --- FIX: Detect and process Flow Submission (nfm_reply) ---
+          if (session.data?.authenticated && !isSessionTokenValid(session.data)) {
+            
+            // Only trigger if they aren't ALREADY trying to enter their PIN
+            if (!session.data?.awaitingPin) {
+              console.log(`Session expired for ${from}. Requesting re-auth.`);
 
-          if (
-            session.data?.authenticated &&
-            !isSessionTokenValid(session.data)
-          ) {
-            console.warn(`Token expired for ${from} — forcing re-login`);
+              // We safely log them out and wipe any pending financial transactions
+              // to prevent them from executing a stale transaction after re-logging in.
+              await updateSession(from, {
+                data: {
+                  ...session.data,
+                  authenticated: false,
+                  awaitingPin: true,
+                  pinAttempts: 0,
+                  // Clear pending states
+                  pendingDeposit: false,
+                  awaitingDepositConfirmation: false,
+                  awaitingDepositPin: false,
+                  swap: null,
+                  send: null,
+                  withdraw: null,
+                  receive: null,
+                },
+              });
 
-            await updateSession(from, {
-              data: {
-                ...session.data, // preserve ALL flow state intact
-                token: null,
-                tokenExpiresAt: null,
-                authenticated: false,
-                awaitingPin: true,
-                pinAttempts: 0,
-              },
-            });
-
-            await sendWhatsApp(
-              from,
-              "🔒 Your session has expired. Please enter your *4-digit PIN* to continue.",
-              phone_number_id,
-            );
-
-            continue; // skip nfm_reply, list_reply, button_reply, text — everything
+              await sendWhatsApp(
+                from,
+                "⏳ Your session has expired for your security.\n\nPlease enter your *4-digit PIN* to securely log back in.",
+                phone_number_id
+              );
+              
+              continue; // Stop processing this message. Force them to log in.
+            }
           }
-
+          
+          // --- FIX: Detect and process Flow Submission (nfm_reply) ---
           if (
             msg.type === "interactive" &&
             msg.interactive?.type === "nfm_reply"
@@ -2294,6 +2237,7 @@ async function processFlowCompletion(phone, phone_number_id, form) {
       email,
       pin,
     });
+
 
     if (!createRes.success) {
       await sendWhatsApp(
