@@ -12,6 +12,8 @@ let tokenExpiresAt = null;
  * loginUser({ phoneNumber, pin, deviceId })
  * Logs the user in and caches accessToken for subsequent API calls.
  */
+// services/auth.service.js
+
 export async function loginUser({ phoneNumber, pin, deviceId = "" }) {
   console.log(phoneNumber, pin, deviceId, "phoneNumber, pin, deviceId");
   try {
@@ -28,18 +30,20 @@ export async function loginUser({ phoneNumber, pin, deviceId = "" }) {
       throw new Error("No access token returned from auth service");
     }
 
+    // 1. CRITICAL: Cache globally so fetchAuthMe works immediately
     cachedToken = token;
     tokenExpiresAt = Date.now() + (expiresIn - 300) * 1000;
-    
+
+    // 2. Only update token-related session data here.
+    // 🛑 DO NOT set authenticated: true or awaitingPin: false here!
     await updateSession(phoneNumber, {
       data: {
         token,
-        pin, // cache pin for re-auth prompting
+        pin, 
         tokenExpiresAt: Date.now() + (expiresIn - 300) * 1000,
-        authenticated: true,
-        awaitingPin: false,
       },
     });
+    
     return token;
   } catch (err) {
     console.error("loginUser ERROR:", err?.response?.data || err.message);

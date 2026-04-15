@@ -166,7 +166,7 @@ router.post("/callback", async (req, res) => {
                   awaitingPin: true,
                   pinAttempts: 0,
                   // Clear pending states
-                  pendingDeposit: false,
+                  pendingDeposit: false, 
                   awaitingDepositConfirmation: false,
                   awaitingDepositPin: false,
                   swap: null,
@@ -2562,6 +2562,98 @@ router.post("/flow/callback", async (req, res) => {
     return res.status(500).send("Server Error");
   }
 });
+
+
+async function handleAuthenticationGate({ from, phone_number_id, msgText }) {
+  const session = await getSession(from);
+
+  // Ask for PIN if not already asked
+  if (!session?.data?.awaitingPin) {
+    await updateSession(from, {
+      data: {
+        awaitingPin: true,
+        pinAttempts: 0,
+        authenticated: false // Strictly enforce logged out state
+      },
+    });
+
+    await sendWhatsApp(
+      from,
+      "🔐 Please enter your *4-digit PIN* to continue.",
+      phone_number_id,
+    );
+
+    return { status: "PIN_REQUESTED" };
+  }
+
+  // User is replying with PIN
+  const pin = msgText?.trim();
+
+  if (!pin || pin.length < 4) {
+    await sendWhatsApp(from, "⚠️ Please enter a valid PIN.", phone_number_id);
+    return { status: "INVALID_PIN" };
+  }
+
+  try {
+    // 1. Attempt login (This caches the token)
+    await loginUser({ phoneNumber: from, pin });
+
+    // 2. Try fetching profile (This proves the token actually works)
+    const me = await fetchAuthMe();
+
+    if (!me) {
+      throw new Error("ME_NOT_FOUND");
+    }
+
+    // 3. FULL SUCCESS 🎉 -> Now we safely declare them logged in
+    await updateSession(from, {
+      data: {
+        awaitingPin: false,
+        authenticated: true, // ✅ Safe to mark true now
+        pinAttempts: 0,
+      },
+    });
+
+    return { status: "SUCCESS", me };
+  } catch (err) {
+    const message = err?.message?.toLowerCase() || "";
+
+    // User not found → onboarding
+    if (
+      message.includes("not found") ||
+      message.includes("user") ||
+      message === "me_not_found"
+    ) {
+      await updateSession(from, {
+        data: {
+          awaitingPin: false,
+          authenticated: false,
+        },
+      });
+
+      return { status: "ONBOARDING_REQUIRED" };
+    }
+
+    // Wrong PIN or API Failure (401)
+    const attempts = (session.data?.pinAttempts || 0) + 1;
+
+    await updateSession(from, {
+      data: {
+        pinAttempts: attempts,
+        awaitingPin: true,    // MUST stay true so they can try again
+        authenticated: false, // MUST stay false
+      },
+    });
+
+    await sendWhatsApp(
+      from,
+      "❌ Incorrect PIN or login failed. Please try again.",
+      phone_number_id,
+    );
+
+    return { status: "WRONG_PIN" };
+  }
+}
 
 // async function handleAuthenticationGate({ from, phone_number_id, msgText }) {
 //   const session = await getSession(from);
