@@ -161,7 +161,7 @@ router.post("/callback", async (req, res) => {
               // to prevent them from executing a stale transaction after re-logging in.
               await updateSession(from, {
                 data: {
-                  ...session.data,
+                  // ...session.data,
                   authenticated: false,
                   awaitingPin: true,
                   pinAttempts: 0,
@@ -2563,102 +2563,104 @@ router.post("/flow/callback", async (req, res) => {
   }
 });
 
-async function handleAuthenticationGate({ from, phone_number_id, msgText }) {
-  const session = await getSession(from);
+// async function handleAuthenticationGate({ from, phone_number_id, msgText }) {
+//   const session = await getSession(from);
 
-  // Already authenticated → continue normally
-  // if (session?.data?.authenticated) {
-  //   return { status: "AUTHENTICATED" };
-  // }
+//   // Already authenticated → continue normally
+//   // if (session?.data?.authenticated) {
+//   //   return { status: "AUTHENTICATED" };
+//   // }
 
-  // Ask for PIN
-  if (!session?.data?.awaitingPin) {
-    await updateSession(from, {
-      data: {
-        ...(session.data || {}),
-        awaitingPin: true,
-        pinAttempts: 0,
-      },
-    });
+//   // Ask for PIN
+//   if (!session?.data?.awaitingPin) {
+//     await updateSession(from, {
+//       data: {
+//         ...(session.data || {}),
+//         awaitingPin: true,
+//         pinAttempts: 0,
+//       },
+//     });
 
-    await sendWhatsApp(
-      from,
-      "🔐 Please enter your *4-digit PIN* to continue.",
-      phone_number_id,
-    );
+//     await sendWhatsApp(
+//       from,
+//       "🔐 Please enter your *4-digit PIN* to continue.",
+//       phone_number_id,
+//     );
 
-    return { status: "PIN_REQUESTED" };
-  }
+//     return { status: "PIN_REQUESTED" };
+//   }
 
-  // User is replying with PIN
-  const pin = msgText?.trim();
+//   // User is replying with PIN
+//   const pin = msgText?.trim();
 
-  if (!pin || pin.length < 4) {
-    await sendWhatsApp(from, "⚠️ Please enter a valid PIN.", phone_number_id);
-    return { status: "INVALID_PIN" };
-  }
+//   if (!pin || pin.length < 4) {
+//     await sendWhatsApp(from, "⚠️ Please enter a valid PIN.", phone_number_id);
+//     return { status: "INVALID_PIN" };
+//   }
 
-  try {
-    // Attempt login
-    await loginUser({ phoneNumber: from, pin });
+//   try {
+//     // Attempt login
+//     await loginUser({ phoneNumber: from, pin });
 
-    // Try fetching profile
-    const me = await fetchAuthMe();
+//     // Try fetching profile
+//     const me = await fetchAuthMe();
 
-    if (!me) {
-      throw new Error("ME_NOT_FOUND");
-    }
+//     if (!me) {
+//       throw new Error("ME_NOT_FOUND");
+//     }
 
-    // Success 🎉
-    await updateSession(from, {
-      data: {
-        ...(session.data || {}),
-        awaitingPin: false,
-        authenticated: true,
-        pinAttempts: 0,
-      },
-    });
+//     // Success 🎉
+//     await updateSession(from, {
+//       data: {
+//         ...(session.data || {}),
+//         awaitingPin: false,
+//         authenticated: true,
+//         pinAttempts: 0,
+//       },
+//     });
 
-    return { status: "SUCCESS", me };
-  } catch (err) {
-    const message = err?.message?.toLowerCase() || "";
+//     return { status: "SUCCESS", me };
+//   } catch (err) {
+//     const message = err?.message?.toLowerCase() || "";
 
-    // User not found → onboarding
-    if (
-      message.includes("not found") ||
-      message.includes("user") ||
-      message === "me_not_found"
-    ) {
-      await updateSession(from, {
-        data: {
-          ...(session.data || {}),
-          awaitingPin: false,
-          authenticated: false,
-        },
-      });
+//     // User not found → onboarding
+//     if (
+//       message.includes("not found") ||
+//       message.includes("user") ||
+//       message === "me_not_found"
+//     ) {
+//       await updateSession(from, {
+//         data: {
+//           ...(session.data || {}),
+//           awaitingPin: false,
+//           authenticated: false,
+//         },
+//       });
 
-      return { status: "ONBOARDING_REQUIRED" };
-    }
+//       return { status: "ONBOARDING_REQUIRED" };
+//     }
 
-    // Wrong PIN
-    const attempts = (session.data?.pinAttempts || 0) + 1;
+//     // Wrong PIN
+//     const attempts = (session.data?.pinAttempts || 0) + 1;
 
-    await updateSession(from, {
-      data: {
-        ...(session.data || {}),
-        pinAttempts: attempts,
-      },
-    });
+//     await updateSession(from, {
+//       data: {
+//         ...(session.data || {}),
+//         pinAttempts: attempts,
+//       },
+//     });
 
-    await sendWhatsApp(
-      from,
-      "❌ Incorrect PIN. Please try again.",
-      phone_number_id,
-    );
+//     await sendWhatsApp(
+//       from,
+//       "❌ Incorrect PIN. Please try again.",
+//       phone_number_id,
+//     );
 
-    return { status: "WRONG_PIN" };
-  }
-}
+//     return { status: "WRONG_PIN" };
+//   }
+// }
+
+
 
 async function sendMainMenu(to, phone_number_id) {
   await sendWhatsApp(
