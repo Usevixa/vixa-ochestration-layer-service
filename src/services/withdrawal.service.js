@@ -25,10 +25,10 @@ export async function fetchWithdrawalQuote(payload) {
   }
 }
 
-export async function fetchBanks() {
+export async function fetchBanks(countryCode) {
   try {
     const token = await getToken();
-    const res = await axios.get(`${BASE_URL}/payment/networks?CountryId=ng`, {
+    const res = await axios.get(`${BASE_URL}/payment/networks?CountryId=${countryCode}`, {
       httpsAgent,
       headers: { Authorization: `Bearer ${token}` },
     });
@@ -70,3 +70,33 @@ export async function executeWithdrawal(payload) {
     return { success: false, error: error?.response?.data || error.message };
   }
 }
+
+export async function fetchSupportedCountries(region = "africa") {
+  try {
+    const token = await getToken();
+    const res = await axios.get(`${BASE_URL}/payment/supported-countries?Region=${region}`, {
+      httpsAgent,
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    return { success: true, data: res.data.data };
+  } catch (error) {
+    console.error("Fetch Countries Error:", error?.response?.data || error.message);
+    return { success: false, error: error?.response?.data || error.message };
+  }
+}
+
+// 🆕 Fetch payment channels based on the selected country
+export async function fetchPaymentChannels(countryCode, ramp = "withdraw") {
+  try {
+    const token = await getToken();
+    const res = await axios.get(`${BASE_URL}/payment/channels?ramp=${ramp}&country=${countryCode}`, {
+      httpsAgent,
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    return { success: true, data: res.data.data };
+  } catch (error) {
+    console.error("Fetch Channels Error:", error?.response?.data || error.message);
+    return { success: false, error: error?.response?.data || error.message };
+  }
+}
+
