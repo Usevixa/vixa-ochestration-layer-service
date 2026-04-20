@@ -2858,6 +2858,31 @@ async function handleAuthenticationGate({ from, phone_number_id, msgText }) {
 // }
 
 
+async function sendWithdrawTypeMenu(to, phone_number_id) {
+  await sendWhatsApp(
+    to,
+    {
+      type: "interactive",
+      interactive: {
+        type: "list",
+        body: { text: "How would you like to withdraw?" },
+        action: {
+          button: "Select Option",
+          sections: [
+            {
+              title: "Withdrawal Options",
+              rows: [
+                { id: "WITHDRAW_TYPE_USDT", title: "Withdraw in USDT" },
+                { id: "WITHDRAW_TYPE_OTHER", title: "Withdraw other coin" },
+              ],
+            },
+          ],
+        },
+      },
+    },
+    phone_number_id,
+  );
+}
 
 async function sendMainMenu(to, phone_number_id) {
   await sendWhatsApp(
