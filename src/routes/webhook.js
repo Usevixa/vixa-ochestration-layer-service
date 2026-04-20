@@ -459,7 +459,8 @@ router.post("/callback", async (req, res) => {
               await sendWhatsApp(from, "⏳ Loading payment channels...", phone_number_id);
 
               // 1. Fetch channels dynamically for selected country
-              const channelsRes = await fetchPaymentChannels(countryCode, "withdraw");
+              const channelsRes = await fetchPaymentChannels(countryCode, "withdraw"); 
+              console.log(countryCode, channelsRes,'channelsRes')
               if (!channelsRes.success || !channelsRes.data?.items?.length) {
                  await sendWhatsApp(from, "⚠️ No payment channels available for this country currently.", phone_number_id);
                  return;

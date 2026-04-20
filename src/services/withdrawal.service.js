@@ -86,7 +86,7 @@ export async function fetchSupportedCountries(region = "africa") {
 }
 
 // 🆕 Fetch payment channels based on the selected country
-export async function fetchPaymentChannels(countryCode, ramp = "withdraw") {
+export async function fetchPaymentChannels(countryCode, ramp) {
   try {
     const token = await getToken();
     const res = await axios.get(`${BASE_URL}/payment/channels?ramp=${ramp}&country=${countryCode}`, {
