@@ -698,7 +698,7 @@ router.post("/callback", async (req, res) => {
               await updateSession(from, {
                 data: {
                   ...session.data,
-                  withdraw: { coin: "USDT", step: "ENTER_AMOUNT" },
+                  withdraw: { ...session.data.withdraw, coin: "USDT", step: "ENTER_AMOUNT" },
                 },
               });
               await sendWhatsApp(
@@ -726,7 +726,7 @@ router.post("/callback", async (req, res) => {
               }));
 
               await updateSession(from, {
-                data: { ...session.data, withdraw: { step: "SELECT_COIN" } },
+               data: { ...session.data, withdraw: { ...session.data.withdraw, step: "SELECT_COIN" } },
               });
               await sendWhatsApp(
                 from,
@@ -751,7 +751,7 @@ router.post("/callback", async (req, res) => {
               await updateSession(from, {
                 data: {
                   ...session.data,
-                  withdraw: { coin, step: "ENTER_AMOUNT" },
+                 withdraw: { ...session.data.withdraw, coin, step: "ENTER_AMOUNT" },
                 },
               });
               await sendWhatsApp(
