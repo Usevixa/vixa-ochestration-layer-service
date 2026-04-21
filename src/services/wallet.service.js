@@ -7,7 +7,7 @@ export async function fetchWalletBalances(coin = "") {
     const token = getToken();
 
     const res = await axios.get(
-      "https://api.usevixa.com/api/v1/wallet/get-balances?Page=1",
+      "https://api.usevixa.com/api/v1/wallet/get-balances?Page=1&PageSize=20",
       {
         headers: {
           Authorization: `Bearer ${token}`,
