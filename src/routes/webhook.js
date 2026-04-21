@@ -8,7 +8,7 @@ import { fetchAuthMe } from "../services/user.service.js";
 import { depositCrypto } from "../services/deposit.service.js";
 import { fetchWalletBalances } from "../services/wallet.service.js";
 import { fetchReceiveWallets } from "../services/recieve.service.js";
-import { analyzeUserIntent } from "../services/ai.service.js";
+import { analyzeUserIntent, humanizeError } from "../services/ai.service.js";
 import { isSessionTokenValid } from "../services/auth.service.js";
 import {
   fetchSwapCurrencies,
@@ -20,7 +20,7 @@ import {
   fetchBanks,
   validateBankAccount,
   executeWithdrawal,
-  fetchSupportedCountries, 
+  fetchSupportedCountries,
   fetchPaymentChannels,
 } from "../services/withdrawal.service.js";
 import { confirmPayment } from "../services/confirmPayment.service.js";
@@ -153,8 +153,10 @@ router.post("/callback", async (req, res) => {
             data: { ...(session.data || {}), phone_number_id },
           });
 
-          if (session.data?.authenticated && !isSessionTokenValid(session.data)) {
-            
+          if (
+            session.data?.authenticated &&
+            !isSessionTokenValid(session.data)
+          ) {
             // Only trigger if they aren't ALREADY trying to enter their PIN
             if (!session.data?.awaitingPin) {
               console.log(`Session expired for ${from}. Requesting re-auth.`);
@@ -168,7 +170,7 @@ router.post("/callback", async (req, res) => {
                   awaitingPin: true,
                   pinAttempts: 0,
                   // Clear pending states
-                  pendingDeposit: false, 
+                  pendingDeposit: false,
                   awaitingDepositConfirmation: false,
                   awaitingDepositPin: false,
                   swap: null,
@@ -181,13 +183,13 @@ router.post("/callback", async (req, res) => {
               await sendWhatsApp(
                 from,
                 "⏳ Your session has expired for your security.\n\nPlease enter your *4-digit PIN* to securely log back in.",
-                phone_number_id
+                phone_number_id,
               );
-              
+
               continue; // Stop processing this message. Force them to log in.
             }
           }
-          
+
           // --- FIX: Detect and process Flow Submission (nfm_reply) ---
           if (
             msg.type === "interactive" &&
@@ -295,11 +297,12 @@ router.post("/callback", async (req, res) => {
               console.log(quote, "qouteres");
 
               if (!quote.success) {
-                await sendWhatsApp(
-                  from,
-                  "⚠️ Unable to get swap quote. Try again.",
-                  phone_number_id,
+                const rawError = quote.error?.message || "Unknown server error";
+                const friendlyMessage = await humanizeError(
+                  rawError,
+                  "get a swap quote",
                 );
+                await sendWhatsApp(from, friendlyMessage, phone_number_id);
                 return;
               }
 
@@ -452,20 +455,31 @@ router.post("/callback", async (req, res) => {
               return;
             }
 
-            // 🆕 SPECIFIC COUNTRY SELECTION HANDLER 
+            // 🆕 SPECIFIC COUNTRY SELECTION HANDLER
             if (actionId.startsWith("WITHDRAW_COUNTRY_")) {
               const countryCode = actionId.replace("WITHDRAW_COUNTRY_", "");
-              
-              await sendWhatsApp(from, "⏳ Loading payment channels...", phone_number_id);
+
+              await sendWhatsApp(
+                from,
+                "⏳ Loading payment channels...",
+                phone_number_id,
+              );
 
               // 1. Fetch channels dynamically for selected country
-              const channelsRes = await fetchPaymentChannels(countryCode, "withdraw"); 
-              console.log(countryCode, channelsRes,'channelsRes')
+              const channelsRes = await fetchPaymentChannels(
+                countryCode,
+                "withdraw",
+              );
+              console.log(countryCode, channelsRes, "channelsRes");
               if (!channelsRes.success || !channelsRes.data?.items?.length) {
-                 await sendWhatsApp(from, "⚠️ No payment channels available for this country currently.", phone_number_id);
-                 return;
+                await sendWhatsApp(
+                  from,
+                  "⚠️ No payment channels available for this country currently.",
+                  phone_number_id,
+                );
+                return;
               }
-              
+
               // 2. Grab the first channel ID
               const firstChannel = channelsRes.data.items[0];
 
@@ -476,10 +490,10 @@ router.post("/callback", async (req, res) => {
                   withdraw: {
                     ...session.data.withdraw,
                     countryCode,
-                    channelId: firstChannel.id, 
-                    step: "SELECT_WITHDRAW_TYPE"
-                  }
-                }
+                    channelId: firstChannel.id,
+                    step: "SELECT_WITHDRAW_TYPE",
+                  },
+                },
               });
 
               await sendWithdrawTypeMenu(from, phone_number_id);
@@ -698,7 +712,11 @@ router.post("/callback", async (req, res) => {
               await updateSession(from, {
                 data: {
                   ...session.data,
-                  withdraw: { ...session.data.withdraw, coin: "USDT", step: "ENTER_AMOUNT" },
+                  withdraw: {
+                    ...session.data.withdraw,
+                    coin: "USDT",
+                    step: "ENTER_AMOUNT",
+                  },
                 },
               });
               await sendWhatsApp(
@@ -726,7 +744,10 @@ router.post("/callback", async (req, res) => {
               }));
 
               await updateSession(from, {
-               data: { ...session.data, withdraw: { ...session.data.withdraw, step: "SELECT_COIN" } },
+                data: {
+                  ...session.data,
+                  withdraw: { ...session.data.withdraw, step: "SELECT_COIN" },
+                },
               });
               await sendWhatsApp(
                 from,
@@ -751,7 +772,11 @@ router.post("/callback", async (req, res) => {
               await updateSession(from, {
                 data: {
                   ...session.data,
-                 withdraw: { ...session.data.withdraw, coin, step: "ENTER_AMOUNT" },
+                  withdraw: {
+                    ...session.data.withdraw,
+                    coin,
+                    step: "ENTER_AMOUNT",
+                  },
                 },
               });
               await sendWhatsApp(
@@ -983,46 +1008,47 @@ router.post("/callback", async (req, res) => {
                 break;
               }
 
-            case "WITHDRAW_CRYPTO": {
-                // Initialize the withdraw object
-                await updateSession(from, {
-                  data: {
-                    ...session.data,
-                    withdraw: { step: "SELECT_WITHDRAW_REGION" },
-                  },
-                });
+              case "WITHDRAW_CRYPTO":
+                {
+                  // Initialize the withdraw object
+                  await updateSession(from, {
+                    data: {
+                      ...session.data,
+                      withdraw: { step: "SELECT_WITHDRAW_REGION" },
+                    },
+                  });
 
-                await sendWhatsApp(
-                  from,
-                  {
-                    type: "interactive",
-                    interactive: {
-                      type: "button",
-                      body: { text: "📍 Where are you withdrawing to?" },
-                      action: {
-                        buttons: [
-                          {
-                            type: "reply",
-                            reply: {
-                              id: "WITHDRAW_REGION_NG",
-                              title: "🇳🇬 Nigeria",
+                  await sendWhatsApp(
+                    from,
+                    {
+                      type: "interactive",
+                      interactive: {
+                        type: "button",
+                        body: { text: "📍 Where are you withdrawing to?" },
+                        action: {
+                          buttons: [
+                            {
+                              type: "reply",
+                              reply: {
+                                id: "WITHDRAW_REGION_NG",
+                                title: "🇳🇬 Nigeria",
+                              },
                             },
-                          },
-                          {
-                            type: "reply",
-                            reply: {
-                              id: "WITHDRAW_REGION_OTHER",
-                              title: "🌍 Other Countries",
+                            {
+                              type: "reply",
+                              reply: {
+                                id: "WITHDRAW_REGION_OTHER",
+                                title: "🌍 Other Countries",
+                              },
                             },
-                          },
-                        ],
+                          ],
+                        },
                       },
                     },
-                  },
-                  phone_number_id,
-                );
-                break;
-              }
+                    phone_number_id,
+                  );
+                  break;
+                }
                 break;
 
               case "SWAP_CRYPTO": {
@@ -1170,15 +1196,23 @@ router.post("/callback", async (req, res) => {
 
             // 🆕 REGION BUTTON REPLIES
             if (actionId === "WITHDRAW_REGION_NG") {
-              await sendWhatsApp(from, "⏳ Loading payment channels...", phone_number_id);
-              
+              await sendWhatsApp(
+                from,
+                "⏳ Loading payment channels...",
+                phone_number_id,
+              );
+
               // 1. Fetch channels dynamically for NG
               const channelsRes = await fetchPaymentChannels("NG", "withdraw");
               if (!channelsRes.success || !channelsRes.data?.items?.length) {
-                 await sendWhatsApp(from, "⚠️ No payment channels available for Nigeria currently.", phone_number_id);
-                 return;
+                await sendWhatsApp(
+                  from,
+                  "⚠️ No payment channels available for Nigeria currently.",
+                  phone_number_id,
+                );
+                return;
               }
-              
+
               // 2. Grab the first channel ID
               const firstChannel = channelsRes.data.items[0];
 
@@ -1189,8 +1223,8 @@ router.post("/callback", async (req, res) => {
                   withdraw: {
                     ...session.data.withdraw,
                     countryCode: "NG",
-                    channelId: firstChannel.id, 
-                    step: "SELECT_WITHDRAW_TYPE"
+                    channelId: firstChannel.id,
+                    step: "SELECT_WITHDRAW_TYPE",
                   },
                 },
               });
@@ -1199,41 +1233,49 @@ router.post("/callback", async (req, res) => {
             }
 
             if (actionId === "WITHDRAW_REGION_OTHER") {
-               const countriesRes = await fetchSupportedCountries("africa");
-               if (!countriesRes.success || !countriesRes.data.length) {
-                 await sendWhatsApp(from, "⚠️ Unable to load supported countries right now.", phone_number_id);
-                 return;
-               }
+              const countriesRes = await fetchSupportedCountries("africa");
+              if (!countriesRes.success || !countriesRes.data.length) {
+                await sendWhatsApp(
+                  from,
+                  "⚠️ Unable to load supported countries right now.",
+                  phone_number_id,
+                );
+                return;
+              }
 
-               // Map up to 10 countries for WhatsApp list
-               const topCountries = countriesRes.data.slice(0, 10);
-               const rows = topCountries.map((c) => ({
-                 id: `WITHDRAW_COUNTRY_${c.countryCode}`,
-                 title: `${c.flag} ${c.countryName}`.substring(0, 24),
-               }));
+              // Map up to 10 countries for WhatsApp list
+              const topCountries = countriesRes.data.slice(0, 10);
+              const rows = topCountries.map((c) => ({
+                id: `WITHDRAW_COUNTRY_${c.countryCode}`,
+                title: `${c.flag} ${c.countryName}`.substring(0, 24),
+              }));
 
-               await updateSession(from, {
-                 data: {
-                   ...session.data,
-                   withdraw: {
-                     ...session.data.withdraw,
-                     step: "SELECT_COUNTRY"
-                   }
-                 }
-               });
+              await updateSession(from, {
+                data: {
+                  ...session.data,
+                  withdraw: {
+                    ...session.data.withdraw,
+                    step: "SELECT_COUNTRY",
+                  },
+                },
+              });
 
-               await sendWhatsApp(from, {
+              await sendWhatsApp(
+                from,
+                {
                   type: "interactive",
                   interactive: {
                     type: "list",
                     body: { text: "🌍 Select your withdrawal country:" },
                     action: {
                       button: "Select Country",
-                      sections: [{ title: "Supported Countries", rows }]
-                    }
-                  }
-               }, phone_number_id);
-               return;
+                      sections: [{ title: "Supported Countries", rows }],
+                    },
+                  },
+                },
+                phone_number_id,
+              );
+              return;
             }
 
             if (actionId === "WITHDRAW_CANCEL") {
@@ -1250,7 +1292,7 @@ router.post("/callback", async (req, res) => {
             }
 
             if (actionId === "QUOTE_CONFIRM_YES") {
-             const countryCode = session.data.withdraw?.countryCode || "ng";
+              const countryCode = session.data.withdraw?.countryCode || "ng";
               const banksRes = await fetchBanks(countryCode);
               if (!banksRes.success || !banksRes.data.length) {
                 await sendWhatsApp(
@@ -1474,6 +1516,7 @@ router.post("/callback", async (req, res) => {
                     {
                       dateStyle: "medium",
                       timeStyle: "short",
+                      timeZone: "Africa/Lagos",
                     },
                   )
                 : "Just now";
@@ -1486,7 +1529,6 @@ router.post("/callback", async (req, res) => {
 • Sell Rate: ${rateData.data.data.sellRate}
 • Base Rate: ${rateData.data.data.baseRate}
 
-🏦 Source: ${rateData.data.data.source}
 🕒 Updated: ${formattedUpdatedAt}
 `.trim();
 
@@ -1530,7 +1572,7 @@ router.post("/callback", async (req, res) => {
                 correlationId: `CORR-${Date.now()}`,
                 idempotencyKey: `IDEMPOTENCY-${Date.now()}`,
                 pin,
-              });
+              }); 
 
               console.log(depositCypto, "depositCryptodepositCrypto");
 
@@ -1544,6 +1586,7 @@ router.post("/callback", async (req, res) => {
                   hour: "2-digit",
                   minute: "2-digit",
                   hour12: true,
+                  timeZone: "Africa/Lagos", // ✅ explicitly set to WAT
                 });
 
                 // 2. Format Amount with commas (e.g., "14,000")
@@ -1720,11 +1763,14 @@ Once you’ve completed the transfer, tap *Confirm Payment* below.`,
               console.log(swapResult, "swapResultswapResult");
 
               if (!swapResult.success) {
-                await sendWhatsApp(
-                  from,
-                  `❌ Swap failed: ${swapResult.error?.message || "Try again."}`,
-                  phone_number_id,
+                const rawError =
+                  swapResult.error?.message || "Unknown server error";
+                const friendlyMessage = await humanizeError(
+                  rawError,
+                  "execute a crypto swap",
                 );
+
+                await sendWhatsApp(from, friendlyMessage, phone_number_id);
 
                 await sendWhatsApp(
                   from,
@@ -1951,11 +1997,14 @@ Once you’ve completed the transfer, tap *Confirm Payment* below.`,
               console.log(sendRes, "checking send crypto");
 
               if (!sendRes.success) {
-                await sendWhatsApp(
-                  from,
-                  `❌ Transfer failed: ${sendRes.error?.message || "Try again."}`,
-                  phone_number_id,
+                const rawError =
+                  sendRes.error?.message || "Unknown server error";
+                const friendlyMessage = await humanizeError(
+                  rawError,
+                  "send crypto to an external address",
                 );
+
+                await sendWhatsApp(from, friendlyMessage, phone_number_id);
                 return;
               }
 
@@ -2016,13 +2065,15 @@ Once you’ve completed the transfer, tap *Confirm Payment* below.`,
             }
 
             if (session.data?.withdraw?.step === "ENTER_QUOTE_PIN") {
+              console.log(session, "qoute session")
               const pin = msg.text?.body?.trim();
+              console.log(pin, pin?.length)
               if (pin.length < 4) {
                 await sendWhatsApp(from, "⚠️ Invalid PIN.", phone_number_id);
                 return;
               }
 
-            const { coin, amount, channelId } = session.data.withdraw;
+              const { coin, amount, channelId } = session.data.withdraw;
 
               const quoteRes = await fetchWithdrawalQuote({
                 coin,
@@ -2032,11 +2083,13 @@ Once you’ve completed the transfer, tap *Confirm Payment* below.`,
               });
 
               if (!quoteRes.success) {
-                await sendWhatsApp(
-                  from,
-                  `❌ Failed to get quote: ${quoteRes.error?.message || "Please try again."}`,
-                  phone_number_id,
+                const rawError =
+                  quoteRes.error?.message || "Unknown server error";
+                const friendlyMessage = await humanizeError(
+                  rawError,
+                  "get a withdrawal quote",
                 );
+                await sendWhatsApp(from, friendlyMessage, phone_number_id);
                 return;
               }
 
@@ -2101,11 +2154,13 @@ Once you’ve completed the transfer, tap *Confirm Payment* below.`,
                 networkId,
               });
               if (!valRes.success) {
-                await sendWhatsApp(
-                  from,
-                  `❌ Account validation failed. Check the number and try again.`,
-                  phone_number_id,
+                const rawError =
+                  valRes.error?.message || "Account validation failed";
+                const friendlyMessage = await humanizeError(
+                  rawError,
+                  "validate bank account details",
                 );
+                await sendWhatsApp(from, friendlyMessage, phone_number_id);
                 return;
               }
 
@@ -2181,11 +2236,13 @@ Once you’ve completed the transfer, tap *Confirm Payment* below.`,
               });
 
               if (!execRes.success) {
-                await sendWhatsApp(
-                  from,
-                  `❌ Withdrawal failed: ${execRes.error?.message || "Please try again."}`,
-                  phone_number_id,
+                const rawError =
+                  execRes.error?.message || "Unknown server error";
+                const friendlyMessage = await humanizeError(
+                  rawError,
+                  "execute a bank withdrawal",
                 );
+                await sendWhatsApp(from, friendlyMessage, phone_number_id);
                 await updateSession(from, {
                   data: { ...session.data, withdraw: null },
                 });
@@ -2343,7 +2400,6 @@ async function processFlowCompletion(phone, phone_number_id, form) {
       pin,
     });
 
-
     if (!createRes.success) {
       await sendWhatsApp(
         phone,
@@ -2436,8 +2492,6 @@ async function processFlowCompletion(phone, phone_number_id, form) {
 I’m VIXA, your AI-powered digital wallet assistant.
 
 I’ll help you send, receive, convert, and manage money — including NGN and crypto (USDT, BTC, ETH) — all directly from WhatsApp.
-
-You can also send voice notes or images, and I’ll understand them.
 
 For your security, please ensure your WhatsApp is locked 🔒
 
@@ -2668,7 +2722,6 @@ router.post("/flow/callback", async (req, res) => {
   }
 });
 
-
 async function handleAuthenticationGate({ from, phone_number_id, msgText }) {
   const session = await getSession(from);
 
@@ -2678,7 +2731,7 @@ async function handleAuthenticationGate({ from, phone_number_id, msgText }) {
       data: {
         awaitingPin: true,
         pinAttempts: 0,
-        authenticated: false // Strictly enforce logged out state
+        authenticated: false, // Strictly enforce logged out state
       },
     });
 
@@ -2745,7 +2798,7 @@ async function handleAuthenticationGate({ from, phone_number_id, msgText }) {
     await updateSession(from, {
       data: {
         pinAttempts: attempts,
-        awaitingPin: true,    // MUST stay true so they can try again
+        awaitingPin: true, // MUST stay true so they can try again
         authenticated: false, // MUST stay false
       },
     });
@@ -2856,7 +2909,6 @@ async function handleAuthenticationGate({ from, phone_number_id, msgText }) {
 //     return { status: "WRONG_PIN" };
 //   }
 // }
-
 
 async function sendWithdrawTypeMenu(to, phone_number_id) {
   await sendWhatsApp(
