@@ -455,6 +455,31 @@ router.post("/callback", async (req, res) => {
               return;
             }
 
+            // 🆕 PAGINATION INTERCEPTOR: Catch "See More" clicks first
+            if (actionId === "WITHDRAW_COUNTRY_NEXT_PAGE") {
+              // 1. Calculate the next page number
+              const nextPage = (session.data.withdraw?.currentPage || 0) + 1;
+              const fullList = session.data.withdraw?.countriesList || [];
+              
+              if (fullList.length === 0) {
+                 await sendWhatsApp(from, "⚠️ Session expired. Please start over.", phone_number_id);
+                 await sendMainMenu(from, phone_number_id);
+                 return;
+              }
+
+              // 2. Update the page number in session
+              await updateSession(from, {
+                data: {
+                  ...session.data,
+                  withdraw: { ...session.data.withdraw, currentPage: nextPage }
+                }
+              });
+
+              // 3. Send the next chunk
+              await sendPaginatedCountriesMenu(from, phone_number_id, fullList, nextPage);
+              return;
+            }
+
             // 🆕 SPECIFIC COUNTRY SELECTION HANDLER
             if (actionId.startsWith("WITHDRAW_COUNTRY_")) {
               const countryCode = actionId.replace("WITHDRAW_COUNTRY_", "");
@@ -1232,50 +1257,79 @@ router.post("/callback", async (req, res) => {
               return;
             }
 
+            // if (actionId === "WITHDRAW_REGION_OTHER") {
+            //   const countriesRes = await fetchSupportedCountries("africa");
+            //   if (!countriesRes.success || !countriesRes.data.length) {
+            //     await sendWhatsApp(
+            //       from,
+            //       "⚠️ Unable to load supported countries right now.",
+            //       phone_number_id,
+            //     );
+            //     return;
+            //   }
+
+            //   // Map up to 10 countries for WhatsApp list
+            //   const topCountries = countriesRes.data.slice(0, 10);
+            //   const rows = topCountries.map((c) => ({
+            //     id: `WITHDRAW_COUNTRY_${c.countryCode}`,
+            //     title: `${c.flag} ${c.countryName}`.substring(0, 24),
+            //   }));
+
+            //   await updateSession(from, {
+            //     data: {
+            //       ...session.data,
+            //       withdraw: {
+            //         ...session.data.withdraw,
+            //         step: "SELECT_COUNTRY",
+            //       },
+            //     },
+            //   });
+
+            //   await sendWhatsApp(
+            //     from,
+            //     {
+            //       type: "interactive",
+            //       interactive: {
+            //         type: "list",
+            //         body: { text: "🌍 Select your withdrawal country:" },
+            //         action: {
+            //           button: "Select Country",
+            //           sections: [{ title: "Supported Countries", rows }],
+            //         },
+            //       },
+            //     },
+            //     phone_number_id,
+            //   );
+            //   return;
+            // }
+
             if (actionId === "WITHDRAW_REGION_OTHER") {
-              const countriesRes = await fetchSupportedCountries("africa");
-              if (!countriesRes.success || !countriesRes.data.length) {
-                await sendWhatsApp(
-                  from,
-                  "⚠️ Unable to load supported countries right now.",
-                  phone_number_id,
-                );
-                return;
-              }
+               await sendWhatsApp(from, "⏳ Loading supported countries...", phone_number_id);
+               const countriesRes = await fetchSupportedCountries("africa");
+               
+               if (!countriesRes.success || !countriesRes.data.length) {
+                 const rawError = countriesRes.error?.message || "Unknown server error";
+                 const friendlyMessage = await humanizeError(rawError, "load supported countries");
+                 await sendWhatsApp(from, friendlyMessage, phone_number_id);
+                 return;
+               }
 
-              // Map up to 10 countries for WhatsApp list
-              const topCountries = countriesRes.data.slice(0, 10);
-              const rows = topCountries.map((c) => ({
-                id: `WITHDRAW_COUNTRY_${c.countryCode}`,
-                title: `${c.flag} ${c.countryName}`.substring(0, 24),
-              }));
+               // 1. Initialize pagination in session
+               await updateSession(from, {
+                 data: {
+                   ...session.data,
+                   withdraw: {
+                     ...session.data.withdraw,
+                     step: "SELECT_COUNTRY",
+                     countriesList: countriesRes.data, // Save full array to memory
+                     currentPage: 0 // Start on page 0
+                   }
+                 }
+               });
 
-              await updateSession(from, {
-                data: {
-                  ...session.data,
-                  withdraw: {
-                    ...session.data.withdraw,
-                    step: "SELECT_COUNTRY",
-                  },
-                },
-              });
-
-              await sendWhatsApp(
-                from,
-                {
-                  type: "interactive",
-                  interactive: {
-                    type: "list",
-                    body: { text: "🌍 Select your withdrawal country:" },
-                    action: {
-                      button: "Select Country",
-                      sections: [{ title: "Supported Countries", rows }],
-                    },
-                  },
-                },
-                phone_number_id,
-              );
-              return;
+               // 2. Trigger the paginated menu helper
+               await sendPaginatedCountriesMenu(from, phone_number_id, countriesRes.data, 0);
+               return;
             }
 
             if (actionId === "WITHDRAW_CANCEL") {
@@ -2909,6 +2963,42 @@ async function handleAuthenticationGate({ from, phone_number_id, msgText }) {
 //     return { status: "WRONG_PIN" };
 //   }
 // }
+
+// 🆕 HELPER: Send Paginated Countries List
+async function sendPaginatedCountriesMenu(to, phone_number_id, countriesList, page = 0) {
+  const itemsPerPage = 9; // Leave 1 slot for the "See More" button
+  const startIndex = page * itemsPerPage;
+  const endIndex = startIndex + itemsPerPage;
+  
+  // Slice exactly 9 items for the current page
+  const currentChunk = countriesList.slice(startIndex, endIndex);
+  
+  const rows = currentChunk.map((c) => ({
+    id: `WITHDRAW_COUNTRY_${c.countryCode}`,
+    title: `${c.flag} ${c.countryName}`.substring(0, 24),
+  }));
+
+  // If there are more items left in the full array, add a 10th "Next" button
+  if (endIndex < countriesList.length) {
+    rows.push({
+      id: `WITHDRAW_COUNTRY_NEXT_PAGE`,
+      title: "➡️ See More Countries",
+      description: "Tap to load more options"
+    });
+  }
+
+  await sendWhatsApp(to, {
+    type: "interactive",
+    interactive: {
+      type: "list",
+      body: { text: `🌍 Select your withdrawal country (Page ${page + 1}):` },
+      action: {
+        button: "Select Country",
+        sections: [{ title: "Supported Countries", rows }]
+      }
+    }
+  }, phone_number_id);
+}
 
 async function sendWithdrawTypeMenu(to, phone_number_id) {
   await sendWhatsApp(
