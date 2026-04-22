@@ -556,55 +556,6 @@ router.post("/callback", async (req, res) => {
                 },
               });
 
-              async function sendPaginatedSwapCoinsMenu(
-                to,
-                phone_number_id,
-                coinsList,
-                page = 0,
-                direction = "FROM",
-              ) {
-                const itemsPerPage = 9;
-                const startIndex = page * itemsPerPage;
-                const endIndex = startIndex + itemsPerPage;
-
-                const currentChunk = coinsList.slice(startIndex, endIndex);
-
-                const rows = currentChunk.map((c) => ({
-                  id: `SWAP_${direction}_${c.coin}`,
-                  title: c.coin,
-                  description: `Min: ${c.minAmount}, Max: ${c.maxAmount}`,
-                }));
-
-                if (endIndex < coinsList.length) {
-                  rows.push({
-                    id: `SWAP_${direction}_PAGE_${page + 1}`,
-                    title: "➡️ See More Coins",
-                    description: "Tap to load more options",
-                  });
-                }
-
-                const bodyText =
-                  direction === "FROM"
-                    ? `🔄 Select the coin you want to swap *from* (Page ${page + 1}):`
-                    : `➡️ Select the coin you want to receive (Page ${page + 1}):`;
-
-                await sendWhatsApp(
-                  to,
-                  {
-                    type: "interactive",
-                    interactive: {
-                      type: "list",
-                      body: { text: bodyText },
-                      action: {
-                        button: "Select coin",
-                        sections: [{ title: "Available Coins", rows }],
-                      },
-                    },
-                  },
-                  phone_number_id,
-                );
-              }
-
               // 3. Send the next chunk
               await sendPaginatedCountriesMenu(
                 from,
@@ -2980,6 +2931,57 @@ async function handleAuthenticationGate({ from, phone_number_id, msgText }) {
   }
 }
 
+
+    async function sendPaginatedSwapCoinsMenu(
+                to,
+                phone_number_id,
+                coinsList,
+                page = 0,
+                direction = "FROM",
+              ) {
+                const itemsPerPage = 9;
+                const startIndex = page * itemsPerPage;
+                const endIndex = startIndex + itemsPerPage;
+
+                const currentChunk = coinsList.slice(startIndex, endIndex);
+
+                const rows = currentChunk.map((c) => ({
+                  id: `SWAP_${direction}_${c.coin}`,
+                  title: c.coin,
+                  description: `Min: ${c.minAmount}, Max: ${c.maxAmount}`,
+                }));
+
+                if (endIndex < coinsList.length) {
+                  rows.push({
+                    id: `SWAP_${direction}_PAGE_${page + 1}`,
+                    title: "➡️ See More Coins",
+                    description: "Tap to load more options",
+                  });
+                }
+
+                const bodyText =
+                  direction === "FROM"
+                    ? `🔄 Select the coin you want to swap *from* (Page ${page + 1}):`
+                    : `➡️ Select the coin you want to receive (Page ${page + 1}):`;
+
+                await sendWhatsApp(
+                  to,
+                  {
+                    type: "interactive",
+                    interactive: {
+                      type: "list",
+                      body: { text: bodyText },
+                      action: {
+                        button: "Select coin",
+                        sections: [{ title: "Available Coins", rows }],
+                      },
+                    },
+                  },
+                  phone_number_id,
+                );
+              }
+
+              
 // async function handleAuthenticationGate({ from, phone_number_id, msgText }) {
 //   const session = await getSession(from);
 
