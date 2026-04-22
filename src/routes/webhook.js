@@ -88,16 +88,14 @@ const PREFERRED_COINS = [
 function pickPreferredCoins(allCurrencies, preferredList) {
   return preferredList
     .map((symbol) => allCurrencies.find((c) => c.coin === symbol))
-    .filter(Boolean) // remove missing coins safely
-    .slice(0, 10); // enforce WhatsApp limit
+    .filter(Boolean); // pagination handles the 10-item limit now
 }
 
 function pickPreferredToCoins(allCurrencies, preferredList, fromCoin) {
   return preferredList
-    .filter((symbol) => symbol !== fromCoin) // exclude from coin
+    .filter((symbol) => symbol !== fromCoin)
     .map((symbol) => allCurrencies.find((c) => c.coin === symbol))
-    .filter(Boolean)
-    .slice(0, 10);
+    .filter(Boolean); // pagination handles the 10-item limit now
 }
 
 // function isFreeText(msg, session) {
@@ -244,11 +242,90 @@ router.post("/callback", async (req, res) => {
               return;
             }
 
+            // SWAP FROM pagination
+            if (actionId.startsWith("SWAP_FROM_PAGE_")) {
+              const nextPage = parseInt(
+                actionId.replace("SWAP_FROM_PAGE_", ""),
+                10,
+              );
+              const coinsList = session.data?.swap?.allCoins || [];
+
+              if (!coinsList.length) {
+                await sendWhatsApp(
+                  from,
+                  "⚠️ Session expired. Please start over.",
+                  phone_number_id,
+                );
+                await sendMainMenu(from, phone_number_id);
+                return;
+              }
+
+              await updateSession(from, {
+                data: {
+                  ...session.data,
+                  swap: { ...session.data.swap, currentFromPage: nextPage },
+                },
+              });
+
+              await sendPaginatedSwapCoinsMenu(
+                from,
+                phone_number_id,
+                coinsList,
+                nextPage,
+                "FROM",
+              );
+              return;
+            }
+
+            // SWAP TO pagination
+            if (actionId.startsWith("SWAP_TO_PAGE_")) {
+              const nextPage = parseInt(
+                actionId.replace("SWAP_TO_PAGE_", ""),
+                10,
+              );
+              const toCoins = session.data?.swap?.toCoins || [];
+
+              if (!toCoins.length) {
+                await sendWhatsApp(
+                  from,
+                  "⚠️ Session expired. Please start over.",
+                  phone_number_id,
+                );
+                await sendMainMenu(from, phone_number_id);
+                return;
+              }
+
+              await updateSession(from, {
+                data: {
+                  ...session.data,
+                  swap: { ...session.data.swap, currentToPage: nextPage },
+                },
+              });
+
+              await sendPaginatedSwapCoinsMenu(
+                from,
+                phone_number_id,
+                toCoins,
+                nextPage,
+                "TO",
+              );
+              return;
+            }
+
             if (actionId.startsWith("SWAP_FROM_")) {
               const coin = actionId.replace("SWAP_FROM_", "");
-              const selected = session.data.swap.currencies.find(
+              const selected = session.data.swap.allCoins.find(
                 (c) => c.coin === coin,
               );
+
+              if (!selected) {
+                await sendWhatsApp(
+                  from,
+                  "⚠️ Coin not found. Please start over.",
+                  phone_number_id,
+                );
+                return;
+              }
 
               await updateSession(from, {
                 data: {
@@ -273,7 +350,7 @@ router.post("/callback", async (req, res) => {
 
             if (actionId.startsWith("SWAP_TO_")) {
               const toCoin = actionId.replace("SWAP_TO_", "");
-              const toLimits = session.data.swap.currencies.find(
+              const toLimits = session.data.swap.toCoins.find(
                 (c) => c.coin === toCoin,
               );
               const { amount } = session.data.swap;
@@ -460,23 +537,81 @@ router.post("/callback", async (req, res) => {
               // 1. Calculate the next page number
               const nextPage = (session.data.withdraw?.currentPage || 0) + 1;
               const fullList = session.data.withdraw?.countriesList || [];
-              
+
               if (fullList.length === 0) {
-                 await sendWhatsApp(from, "⚠️ Session expired. Please start over.", phone_number_id);
-                 await sendMainMenu(from, phone_number_id);
-                 return;
+                await sendWhatsApp(
+                  from,
+                  "⚠️ Session expired. Please start over.",
+                  phone_number_id,
+                );
+                await sendMainMenu(from, phone_number_id);
+                return;
               }
 
               // 2. Update the page number in session
               await updateSession(from, {
                 data: {
                   ...session.data,
-                  withdraw: { ...session.data.withdraw, currentPage: nextPage }
-                }
+                  withdraw: { ...session.data.withdraw, currentPage: nextPage },
+                },
               });
 
+              async function sendPaginatedSwapCoinsMenu(
+                to,
+                phone_number_id,
+                coinsList,
+                page = 0,
+                direction = "FROM",
+              ) {
+                const itemsPerPage = 9;
+                const startIndex = page * itemsPerPage;
+                const endIndex = startIndex + itemsPerPage;
+
+                const currentChunk = coinsList.slice(startIndex, endIndex);
+
+                const rows = currentChunk.map((c) => ({
+                  id: `SWAP_${direction}_${c.coin}`,
+                  title: c.coin,
+                  description: `Min: ${c.minAmount}, Max: ${c.maxAmount}`,
+                }));
+
+                if (endIndex < coinsList.length) {
+                  rows.push({
+                    id: `SWAP_${direction}_PAGE_${page + 1}`,
+                    title: "➡️ See More Coins",
+                    description: "Tap to load more options",
+                  });
+                }
+
+                const bodyText =
+                  direction === "FROM"
+                    ? `🔄 Select the coin you want to swap *from* (Page ${page + 1}):`
+                    : `➡️ Select the coin you want to receive (Page ${page + 1}):`;
+
+                await sendWhatsApp(
+                  to,
+                  {
+                    type: "interactive",
+                    interactive: {
+                      type: "list",
+                      body: { text: bodyText },
+                      action: {
+                        button: "Select coin",
+                        sections: [{ title: "Available Coins", rows }],
+                      },
+                    },
+                  },
+                  phone_number_id,
+                );
+              }
+
               // 3. Send the next chunk
-              await sendPaginatedCountriesMenu(from, phone_number_id, fullList, nextPage);
+              await sendPaginatedCountriesMenu(
+                from,
+                phone_number_id,
+                fullList,
+                nextPage,
+              );
               return;
             }
 
@@ -1078,10 +1213,7 @@ router.post("/callback", async (req, res) => {
 
               case "SWAP_CRYPTO": {
                 const currenciesRes = await fetchSwapCurrencies();
-                console.log(
-                  currenciesRes?.data?.data?.currencies,
-                  "currenciesRes",
-                );
+
                 if (!currenciesRes.success) {
                   await sendWhatsApp(
                     from,
@@ -1092,48 +1224,31 @@ router.post("/callback", async (req, res) => {
                 }
 
                 const allCoins = currenciesRes?.data?.data?.currencies;
-
                 const selectedCoins = pickPreferredCoins(
                   allCoins,
                   PREFERRED_COINS,
                 );
-
-                const rows = selectedCoins.map((c) => ({
-                  id: `SWAP_FROM_${c.coin}`,
-                  title: c.coin,
-                  description: `Min: ${c.minAmount}, Max: ${c.maxAmount}`,
-                }));
 
                 await updateSession(from, {
                   data: {
                     ...(session.data || {}),
                     swap: {
                       step: "SELECT_FROM",
-                      currencies: selectedCoins,
+                      allCoins: selectedCoins,
+                      currentFromPage: 0,
                     },
                   },
                 });
-                await sendWhatsApp(
-                  from,
-                  {
-                    type: "interactive",
-                    interactive: {
-                      type: "list",
-                      body: {
-                        text: "🔄 Select the coin you want to swap *from*",
-                      },
-                      action: {
-                        button: "Select coin",
-                        sections: [{ title: "Available Coins", rows }],
-                      },
-                    },
-                  },
-                  phone_number_id,
-                );
 
+                await sendPaginatedSwapCoinsMenu(
+                  from,
+                  phone_number_id,
+                  selectedCoins,
+                  0,
+                  "FROM",
+                );
                 break;
               }
-
               case "GET_WALLET_BALANCE": {
                 try {
                   // 1. Get session (we need phone + pin)
@@ -1304,32 +1419,45 @@ router.post("/callback", async (req, res) => {
             // }
 
             if (actionId === "WITHDRAW_REGION_OTHER") {
-               await sendWhatsApp(from, "⏳ Loading supported countries...", phone_number_id);
-               const countriesRes = await fetchSupportedCountries("africa");
-               
-               if (!countriesRes.success || !countriesRes.data.length) {
-                 const rawError = countriesRes.error?.message || "Unknown server error";
-                 const friendlyMessage = await humanizeError(rawError, "load supported countries");
-                 await sendWhatsApp(from, friendlyMessage, phone_number_id);
-                 return;
-               }
+              await sendWhatsApp(
+                from,
+                "⏳ Loading supported countries...",
+                phone_number_id,
+              );
+              const countriesRes = await fetchSupportedCountries("africa");
 
-               // 1. Initialize pagination in session
-               await updateSession(from, {
-                 data: {
-                   ...session.data,
-                   withdraw: {
-                     ...session.data.withdraw,
-                     step: "SELECT_COUNTRY",
-                     countriesList: countriesRes.data, // Save full array to memory
-                     currentPage: 0 // Start on page 0
-                   }
-                 }
-               });
+              if (!countriesRes.success || !countriesRes.data.length) {
+                const rawError =
+                  countriesRes.error?.message || "Unknown server error";
+                const friendlyMessage = await humanizeError(
+                  rawError,
+                  "load supported countries",
+                );
+                await sendWhatsApp(from, friendlyMessage, phone_number_id);
+                return;
+              }
 
-               // 2. Trigger the paginated menu helper
-               await sendPaginatedCountriesMenu(from, phone_number_id, countriesRes.data, 0);
-               return;
+              // 1. Initialize pagination in session
+              await updateSession(from, {
+                data: {
+                  ...session.data,
+                  withdraw: {
+                    ...session.data.withdraw,
+                    step: "SELECT_COUNTRY",
+                    countriesList: countriesRes.data, // Save full array to memory
+                    currentPage: 0, // Start on page 0
+                  },
+                },
+              });
+
+              // 2. Trigger the paginated menu helper
+              await sendPaginatedCountriesMenu(
+                from,
+                phone_number_id,
+                countriesRes.data,
+                0,
+              );
+              return;
             }
 
             if (actionId === "WITHDRAW_CANCEL") {
@@ -1626,7 +1754,7 @@ router.post("/callback", async (req, res) => {
                 correlationId: `CORR-${Date.now()}`,
                 idempotencyKey: `IDEMPOTENCY-${Date.now()}`,
                 pin,
-              }); 
+              });
 
               console.log(depositCypto, "depositCryptodepositCrypto");
 
@@ -1746,21 +1874,14 @@ Once you’ve completed the transfer, tap *Confirm Payment* below.`,
                 return;
               }
 
-              // Fetch currencies again for TO selection
               const currenciesRes = await fetchSwapCurrencies();
-
               const allCoins = currenciesRes?.data?.data?.currencies;
               const fromCoin = session.data.swap.fromCoin;
-              const selectedToCoins = pickPreferredToCoins(
+              const toCoins = pickPreferredToCoins(
                 allCoins,
                 PREFERRED_COINS,
                 fromCoin,
               );
-              const rows = selectedToCoins.map((c) => ({
-                id: `SWAP_TO_${c.coin}`,
-                title: c.coin,
-                description: `Min: ${c.minAmount}, Max: ${c.maxAmount}`,
-              }));
 
               await updateSession(from, {
                 data: {
@@ -1769,27 +1890,19 @@ Once you’ve completed the transfer, tap *Confirm Payment* below.`,
                     ...session.data.swap,
                     step: "SELECT_TO",
                     amount,
-                    currencies: selectedToCoins,
+                    toCoins,
+                    currentToPage: 0,
                   },
                 },
               });
 
-              await sendWhatsApp(
+              await sendPaginatedSwapCoinsMenu(
                 from,
-                {
-                  type: "interactive",
-                  interactive: {
-                    type: "list",
-                    body: { text: "➡️ Select the coin you want to receive" },
-                    action: {
-                      button: "Select coin",
-                      sections: [{ title: "Available Coins", rows }],
-                    },
-                  },
-                },
                 phone_number_id,
+                toCoins,
+                0,
+                "TO",
               );
-
               return;
             }
 
@@ -2119,9 +2232,9 @@ Once you’ve completed the transfer, tap *Confirm Payment* below.`,
             }
 
             if (session.data?.withdraw?.step === "ENTER_QUOTE_PIN") {
-              console.log(session, "qoute session")
+              console.log(session, "qoute session");
               const pin = msg.text?.body?.trim();
-              console.log(pin, pin?.length)
+              console.log(pin, pin?.length);
               if (pin.length < 4) {
                 await sendWhatsApp(from, "⚠️ Invalid PIN.", phone_number_id);
                 return;
@@ -2965,14 +3078,19 @@ async function handleAuthenticationGate({ from, phone_number_id, msgText }) {
 // }
 
 // 🆕 HELPER: Send Paginated Countries List
-async function sendPaginatedCountriesMenu(to, phone_number_id, countriesList, page = 0) {
+async function sendPaginatedCountriesMenu(
+  to,
+  phone_number_id,
+  countriesList,
+  page = 0,
+) {
   const itemsPerPage = 9; // Leave 1 slot for the "See More" button
   const startIndex = page * itemsPerPage;
   const endIndex = startIndex + itemsPerPage;
-  
+
   // Slice exactly 9 items for the current page
   const currentChunk = countriesList.slice(startIndex, endIndex);
-  
+
   const rows = currentChunk.map((c) => ({
     id: `WITHDRAW_COUNTRY_${c.countryCode}`,
     title: `${c.flag} ${c.countryName}`.substring(0, 24),
@@ -2983,21 +3101,25 @@ async function sendPaginatedCountriesMenu(to, phone_number_id, countriesList, pa
     rows.push({
       id: `WITHDRAW_COUNTRY_NEXT_PAGE`,
       title: "➡️ See More Countries",
-      description: "Tap to load more options"
+      description: "Tap to load more options",
     });
   }
 
-  await sendWhatsApp(to, {
-    type: "interactive",
-    interactive: {
-      type: "list",
-      body: { text: `🌍 Select your withdrawal country (Page ${page + 1}):` },
-      action: {
-        button: "Select Country",
-        sections: [{ title: "Supported Countries", rows }]
-      }
-    }
-  }, phone_number_id);
+  await sendWhatsApp(
+    to,
+    {
+      type: "interactive",
+      interactive: {
+        type: "list",
+        body: { text: `🌍 Select your withdrawal country (Page ${page + 1}):` },
+        action: {
+          button: "Select Country",
+          sections: [{ title: "Supported Countries", rows }],
+        },
+      },
+    },
+    phone_number_id,
+  );
 }
 
 async function sendWithdrawTypeMenu(to, phone_number_id) {
