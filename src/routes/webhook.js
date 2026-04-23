@@ -73,16 +73,26 @@ function normalizePhone(phone) {
 }
 
 const PREFERRED_COINS = [
-  "USDT",
   "BTC",
   "ETH",
+  "USDT",
   "USDC",
   "BNB",
   "XRP",
   "SOL",
-  "LTC",
-  "DOGE",
   "TRX",
+  "DOGE",
+  "ADA",
+  "AVAX",
+  "DOT",
+  "LINK",
+  "TON",
+  "NEAR",
+  "SUI",
+  "MATIC",
+  "LTC",
+  "BCH",
+  "UNI",
 ];
 
 function pickPreferredCoins(allCurrencies, preferredList) {
