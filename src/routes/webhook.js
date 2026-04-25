@@ -365,15 +365,15 @@ router.post("/callback", async (req, res) => {
               );
               const { amount } = session.data.swap;
 
-              // 🔴 CRITICAL RULE
-              if (amount < toLimits.minAmount || amount > toLimits.maxAmount) {
-                await sendWhatsApp(
-                  from,
-                  `❌ Amount not supported for ${toCoin}. Range: ${toLimits.minAmount} - ${toLimits.maxAmount}`,
-                  phone_number_id,
-                );
-                return;
-              }
+              // // 🔴 CRITICAL RULE
+              // if (amount < toLimits.minAmount || amount > toLimits.maxAmount) {
+              //   await sendWhatsApp(
+              //     from,
+              //     `❌ Amount not supported for ${toCoin}. Range: ${toLimits.minAmount} - ${toLimits.maxAmount}`,
+              //     phone_number_id,
+              //   );
+              //   return;
+              // }
 
               const quote = await fetchSwapQuote({
                 fromCoin: session.data.swap.fromCoin,
