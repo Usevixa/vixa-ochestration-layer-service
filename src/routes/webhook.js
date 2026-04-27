@@ -580,11 +580,11 @@ router.post("/callback", async (req, res) => {
             if (actionId.startsWith("WITHDRAW_COUNTRY_")) {
               const countryCode = actionId.replace("WITHDRAW_COUNTRY_", "");
 
-              await sendWhatsApp(
-                from,
-                "⏳ Loading payment channels...",
-                phone_number_id,
-              );
+              // await sendWhatsApp(
+              //   from,
+              //   "⏳ Loading payment channels...",
+              //   phone_number_id,
+              // );
 
               // 1. Fetch channels dynamically for selected country
               const channelsRes = await fetchPaymentChannels(
@@ -1297,11 +1297,11 @@ router.post("/callback", async (req, res) => {
 
             // 🆕 REGION BUTTON REPLIES
             if (actionId === "WITHDRAW_REGION_NG") {
-              await sendWhatsApp(
-                from,
-                "⏳ Loading payment channels...",
-                phone_number_id,
-              );
+              // await sendWhatsApp(
+              //   from,
+              //   "⏳ Loading payment channels...",
+              //   phone_number_id,
+              // );
 
               // 1. Fetch channels dynamically for NG
               const channelsRes = await fetchPaymentChannels("NG", "withdraw");
@@ -1380,11 +1380,11 @@ router.post("/callback", async (req, res) => {
             // }
 
             if (actionId === "WITHDRAW_REGION_OTHER") {
-              await sendWhatsApp(
-                from,
-                "⏳ Loading supported countries...",
-                phone_number_id,
-              );
+              // await sendWhatsApp(
+              //   from,
+              //   "⏳ Loading supported countries...",
+              //   phone_number_id,
+              // );
               const countriesRes = await fetchSupportedCountries("africa");
 
               if (!countriesRes.success || !countriesRes.data.length) {
@@ -2222,7 +2222,7 @@ Once you’ve completed the transfer, tap *Confirm Payment* below.`,
               }
 
               const q = quoteRes.data;
-              const msgText = `📊 *Withdrawal Quote*\n\nWithdrawing: ${q.coinAmount} ${q.coin}\nEstimated NGN: ${q.estimatedNgn} ${q.fiatCurrency}\nFees: ${q.totalFees}\n\nDo you want to proceed?`;
+              const msgText = `📊 *Withdrawal Quote*\n\nWithdrawing: ${q.coinAmount} ${q.coin}\nEstimated NGN: ${q.estimatedFiat} ${q.fiatCurrency}\nFees: ${q.totalFees}\n\nDo you want to proceed?`;
 
               await updateSession(from, {
                 data: {
