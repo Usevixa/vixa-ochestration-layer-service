@@ -908,6 +908,41 @@ router.post("/callback", async (req, res) => {
               return;
             }
 
+            // BANK pagination
+            if (actionId === "WITHDRAW_BANK_NEXT_PAGE") {
+              const nextPage =
+                (session.data.withdraw?.currentBankPage || 0) + 1;
+              const fullList = session.data.withdraw?.banks || [];
+
+              if (!fullList.length) {
+                await sendWhatsApp(
+                  from,
+                  "⚠️ Session expired. Please start over.",
+                  phone_number_id,
+                );
+                await sendMainMenu(from, phone_number_id);
+                return;
+              }
+
+              await updateSession(from, {
+                data: {
+                  ...session.data,
+                  withdraw: {
+                    ...session.data.withdraw,
+                    currentBankPage: nextPage,
+                  },
+                },
+              });
+
+              await sendPaginatedBanksMenu(
+                from,
+                phone_number_id,
+                fullList,
+                nextPage,
+              );
+              return;
+            }
+
             if (actionId.startsWith("WITHDRAW_BANK_")) {
               const networkId = actionId.replace("WITHDRAW_BANK_", "");
               // Retrieve bank name from session cache
@@ -1434,6 +1469,54 @@ router.post("/callback", async (req, res) => {
               return;
             }
 
+            // if (actionId === "QUOTE_CONFIRM_YES") {
+            //   const countryCode = session.data.withdraw?.countryCode || "ng";
+            //   const banksRes = await fetchBanks(countryCode);
+            //   if (!banksRes.success || !banksRes.data.length) {
+            //     await sendWhatsApp(
+            //       from,
+            //       "⚠️ Unable to load banks right now. Please try again later.",
+            //       phone_number_id,
+            //     );
+            //     return;
+            //   }
+
+            //   // WhatsApp limits lists to 10 items. We slice the top 10 here.
+            //   const topBanks = banksRes.data.slice(5, 15);
+            //   const rows = topBanks.map((b) => ({
+            //     id: `WITHDRAW_BANK_${b.id}`,
+            //     title: b.name.substring(0, 24), // WhatsApp title limit is 24 chars
+            //   }));
+
+            //   await updateSession(from, {
+            //     data: {
+            //       ...session.data,
+            //       withdraw: {
+            //         ...session.data.withdraw,
+            //         banks: topBanks,
+            //         step: "SELECT_BANK",
+            //       },
+            //     },
+            //   });
+
+            //   await sendWhatsApp(
+            //     from,
+            //     {
+            //       type: "interactive",
+            //       interactive: {
+            //         type: "list",
+            //         body: { text: "🏦 Select your destination bank:" },
+            //         action: {
+            //           button: "Select Bank",
+            //           sections: [{ title: "Available Banks", rows }],
+            //         },
+            //       },
+            //     },
+            //     phone_number_id,
+            //   );
+            //   return;
+            // }
+
             if (actionId === "QUOTE_CONFIRM_YES") {
               const countryCode = session.data.withdraw?.countryCode || "ng";
               const banksRes = await fetchBanks(countryCode);
@@ -1446,39 +1529,21 @@ router.post("/callback", async (req, res) => {
                 return;
               }
 
-              // WhatsApp limits lists to 10 items. We slice the top 10 here.
-              const topBanks = banksRes.data.slice(5, 15);
-              const rows = topBanks.map((b) => ({
-                id: `WITHDRAW_BANK_${b.id}`,
-                title: b.name.substring(0, 24), // WhatsApp title limit is 24 chars
-              }));
+              const allBanks = banksRes.data; // ✅ No more slice — keep full list
 
               await updateSession(from, {
                 data: {
                   ...session.data,
                   withdraw: {
                     ...session.data.withdraw,
-                    banks: topBanks,
+                    banks: allBanks, // full list saved to session
+                    currentBankPage: 0, // start on page 0
                     step: "SELECT_BANK",
                   },
                 },
               });
 
-              await sendWhatsApp(
-                from,
-                {
-                  type: "interactive",
-                  interactive: {
-                    type: "list",
-                    body: { text: "🏦 Select your destination bank:" },
-                    action: {
-                      button: "Select Bank",
-                      sections: [{ title: "Available Banks", rows }],
-                    },
-                  },
-                },
-                phone_number_id,
-              );
+              await sendPaginatedBanksMenu(from, phone_number_id, allBanks, 0);
               return;
             }
 
@@ -2941,57 +3006,97 @@ async function handleAuthenticationGate({ from, phone_number_id, msgText }) {
   }
 }
 
+async function sendPaginatedSwapCoinsMenu(
+  to,
+  phone_number_id,
+  coinsList,
+  page = 0,
+  direction = "FROM",
+) {
+  const itemsPerPage = 9;
+  const startIndex = page * itemsPerPage;
+  const endIndex = startIndex + itemsPerPage;
 
-    async function sendPaginatedSwapCoinsMenu(
-                to,
-                phone_number_id,
-                coinsList,
-                page = 0,
-                direction = "FROM",
-              ) {
-                const itemsPerPage = 9;
-                const startIndex = page * itemsPerPage;
-                const endIndex = startIndex + itemsPerPage;
+  const currentChunk = coinsList.slice(startIndex, endIndex);
 
-                const currentChunk = coinsList.slice(startIndex, endIndex);
+  const rows = currentChunk.map((c) => ({
+    id: `SWAP_${direction}_${c.coin}`,
+    title: c.coin,
+    description: `Min: ${c.minAmount}, Max: ${c.maxAmount}`,
+  }));
 
-                const rows = currentChunk.map((c) => ({
-                  id: `SWAP_${direction}_${c.coin}`,
-                  title: c.coin,
-                  description: `Min: ${c.minAmount}, Max: ${c.maxAmount}`,
-                }));
+  if (endIndex < coinsList.length) {
+    rows.push({
+      id: `SWAP_${direction}_PAGE_${page + 1}`,
+      title: "➡️ See More Coins",
+      description: "Tap to load more options",
+    });
+  }
 
-                if (endIndex < coinsList.length) {
-                  rows.push({
-                    id: `SWAP_${direction}_PAGE_${page + 1}`,
-                    title: "➡️ See More Coins",
-                    description: "Tap to load more options",
-                  });
-                }
+  const bodyText =
+    direction === "FROM"
+      ? `🔄 Select the coin you want to swap *from* (Page ${page + 1}):`
+      : `➡️ Select the coin you want to receive (Page ${page + 1}):`;
 
-                const bodyText =
-                  direction === "FROM"
-                    ? `🔄 Select the coin you want to swap *from* (Page ${page + 1}):`
-                    : `➡️ Select the coin you want to receive (Page ${page + 1}):`;
+  await sendWhatsApp(
+    to,
+    {
+      type: "interactive",
+      interactive: {
+        type: "list",
+        body: { text: bodyText },
+        action: {
+          button: "Select coin",
+          sections: [{ title: "Available Coins", rows }],
+        },
+      },
+    },
+    phone_number_id,
+  );
+}
 
-                await sendWhatsApp(
-                  to,
-                  {
-                    type: "interactive",
-                    interactive: {
-                      type: "list",
-                      body: { text: bodyText },
-                      action: {
-                        button: "Select coin",
-                        sections: [{ title: "Available Coins", rows }],
-                      },
-                    },
-                  },
-                  phone_number_id,
-                );
-              }
+async function sendPaginatedBanksMenu(
+  to,
+  phone_number_id,
+  banksList,
+  page = 0,
+) {
+  const itemsPerPage = 9;
+  const startIndex = page * itemsPerPage;
+  const endIndex = startIndex + itemsPerPage;
 
-              
+  const currentChunk = banksList.slice(startIndex, endIndex);
+
+  const rows = currentChunk.map((b) => ({
+    id: `WITHDRAW_BANK_${b.id}`,
+    title: b.name.substring(0, 24),
+  }));
+
+  if (endIndex < banksList.length) {
+    rows.push({
+      id: `WITHDRAW_BANK_NEXT_PAGE`,
+      title: "➡️ See More Banks",
+      description: "Tap to load more options",
+    });
+  }
+
+  await sendWhatsApp(
+    to,
+    {
+      type: "interactive",
+      interactive: {
+        type: "list",
+        body: { text: `🏦 Select your destination bank (Page ${page + 1}):` },
+        action: {
+          button: "Select Bank",
+          sections: [{ title: "Available Banks", rows }],
+        },
+      },
+    },
+    phone_number_id,
+  );
+}
+
 // async function handleAuthenticationGate({ from, phone_number_id, msgText }) {
 //   const session = await getSession(from);
 
