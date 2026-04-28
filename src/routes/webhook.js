@@ -2287,7 +2287,7 @@ Once you’ve completed the transfer, tap *Confirm Payment* below.`,
               }
 
               const q = quoteRes.data;
-              const msgText = `📊 *Withdrawal Quote*\n\nWithdrawing: ${q.coinAmount} ${q.coin}\nEstimated NGN: ${q.estimatedFiat} ${q.fiatCurrency}\nFees: ${q.totalFees}\n\nDo you want to proceed?`;
+              const msgText = `📊 *Withdrawal Quote*\n\nWithdrawing: ${q.coinAmount} ${q.coin}\nEstimated ${q.fiatCurrency}: ${q.estimatedFiat} ${q.fiatCurrency}\nFees: ${q.totalFees}\n\nDo you want to proceed?`;
 
               await updateSession(from, {
                 data: {
