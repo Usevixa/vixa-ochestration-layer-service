@@ -1519,7 +1519,8 @@ router.post("/callback", async (req, res) => {
 
             if (actionId === "QUOTE_CONFIRM_YES") {
               const countryCode = session.data.withdraw?.countryCode || "ng";
-              const banksRes = await fetchBanks(countryCode);
+              const channelId = session.data.withdraw?.channelId;
+              const banksRes = await fetchBanks(countryCode, channelId);
               if (!banksRes.success || !banksRes.data.length) {
                 await sendWhatsApp(
                   from,
@@ -1529,7 +1530,7 @@ router.post("/callback", async (req, res) => {
                 return;
               }
 
-              const allBanks = banksRes.data; // ✅ No more slice — keep full list
+              const allBanks = banksRes.data;
 
               await updateSession(from, {
                 data: {

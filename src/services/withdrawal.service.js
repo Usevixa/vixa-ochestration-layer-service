@@ -25,10 +25,10 @@ export async function fetchWithdrawalQuote(payload) {
   }
 }
 
-export async function fetchBanks(countryCode) {
+export async function fetchBanks(countryCode, channelId) { 
   try {
     const token = await getToken();
-    const res = await axios.get(`${BASE_URL}/payment/networks?CountryId=${countryCode}`, {
+    const res = await axios.get(`${BASE_URL}/payment/networks?CountryId=${countryCode}&ChannelId=${channelId}`, {
       httpsAgent,
       headers: { Authorization: `Bearer ${token}` },
     });
