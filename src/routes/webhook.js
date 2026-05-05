@@ -602,7 +602,17 @@ router.post("/callback", async (req, res) => {
               }
 
               // 2. Grab the first channel ID
-              const firstChannel = channelsRes.data.items[0];
+              const items = channelsRes.data.items;
+              const momoChannel = items.find(
+                (c) => c.channelType?.toLowerCase() === "momo",
+              );
+              const selectedChannel = momoChannel || items[0];
+
+              console.log(
+                `Selected channel for ${countryCode}:`,
+                selectedChannel.id,
+                selectedChannel.channelType,
+              );
 
               // 3. Save both to session
               await updateSession(from, {
@@ -611,7 +621,7 @@ router.post("/callback", async (req, res) => {
                   withdraw: {
                     ...session.data.withdraw,
                     countryCode,
-                    channelId: firstChannel.id,
+                    channelId: selectedChannel.id,
                     step: "SELECT_WITHDRAW_TYPE",
                   },
                 },
@@ -950,6 +960,8 @@ router.post("/callback", async (req, res) => {
                 session.data.withdraw.banks.find((b) => b.id === networkId)
                   ?.name || "Selected Bank";
 
+              const isNigeria = session.data.withdraw?.countryCode === "NG";
+
               await updateSession(from, {
                 data: {
                   ...session.data,
@@ -957,15 +969,30 @@ router.post("/callback", async (req, res) => {
                     ...session.data.withdraw,
                     networkId,
                     bankName,
-                    step: "ENTER_ACCOUNT_NUMBER",
+                    step: isNigeria
+                      ? "ENTER_ACCOUNT_NUMBER"
+                      : "ENTER_ACCOUNT_NAME",
                   },
                 },
               });
-              await sendWhatsApp(
-                from,
-                `🏦 You selected *${bankName}*.\n\nPlease enter your 10-digit Account Number:`,
-                phone_number_id,
-              );
+              // await sendWhatsApp(
+              //   from,
+              //   `🏦 You selected *${bankName}*.\n\nPlease enter your 10-digit Account Number:`,
+              //   phone_number_id,
+              // );
+              if (isNigeria) {
+                await sendWhatsApp(
+                  from,
+                  `🏦 You selected *${bankName}*.\n\nPlease enter your 10-digit Account Number:`,
+                  phone_number_id,
+                );
+              } else {
+                await sendWhatsApp(
+                  from,
+                  `🏦 You selected *${bankName}*.\n\nPlease enter your *Account Name*:`,
+                  phone_number_id,
+                );
+              }
               return;
             }
 
@@ -2296,6 +2323,7 @@ Once you’ve completed the transfer, tap *Confirm Payment* below.`,
                   withdraw: {
                     ...session.data.withdraw,
                     channelId,
+                    pin, // ← save PIN here so we can reuse it later
                     step: "AWAITING_QUOTE_CONFIRM",
                   },
                 },
@@ -2327,6 +2355,96 @@ Once you’ve completed the transfer, tap *Confirm Payment* below.`,
                 },
                 phone_number_id,
               );
+              return;
+            }
+
+            if (session.data?.withdraw?.step === "ENTER_ACCOUNT_NAME") {
+              const accountName = msg.text?.body?.trim();
+
+              if (!accountName || accountName.length < 2) {
+                await sendWhatsApp(
+                  from,
+                  "⚠️ Please enter a valid account name.",
+                  phone_number_id,
+                );
+                return;
+              }
+
+              await updateSession(from, {
+                data: {
+                  ...session.data,
+                  withdraw: {
+                    ...session.data.withdraw,
+                    accountName,
+                    step: "ENTER_ACCOUNT_NUMBER_OTHER",
+                  },
+                },
+              });
+
+              await sendWhatsApp(
+                from,
+                "🔢 Please enter your *Account Number*:",
+                phone_number_id,
+              );
+              return;
+            }
+
+            if (session.data?.withdraw?.step === "ENTER_ACCOUNT_NUMBER_OTHER") {
+              const accountNumber = msg.text?.body?.trim();
+
+              if (!accountNumber || accountNumber.length < 4) {
+                await sendWhatsApp(
+                  from,
+                  "⚠️ Please enter a valid account number.",
+                  phone_number_id,
+                );
+                return;
+              }
+
+              const { coin, amount, accountName, networkId, channelId } =
+                session.data.withdraw;
+
+              const execRes = await executeWithdrawal({
+                coin,
+                amount,
+                accountNumber,
+                accountName,
+                networkId,
+                channelId,
+                pin: session.data.withdraw.pin,
+              });
+
+              if (!execRes.success) {
+                const rawError =
+                  execRes.error?.message || "Unknown server error";
+                const friendlyMessage = await humanizeError(
+                  rawError,
+                  "execute a bank withdrawal",
+                );
+                await sendWhatsApp(from, friendlyMessage, phone_number_id);
+                await updateSession(from, {
+                  data: { ...session.data, withdraw: null },
+                });
+                await sendMainMenu(from, phone_number_id);
+                return;
+              }
+
+              const result = execRes.data;
+              await sendWhatsApp(
+                from,
+                `✅ *Withdrawal Successful!*\n\nAmount: ${result.amount} ${result.coin}\nTo: ${accountName}\nAccount: ${accountNumber}\nRef: ${result.reference}\n\n🚀 Funds are on the way!`,
+                phone_number_id,
+              );
+
+              await updateSession(from, {
+                data: { ...session.data, withdraw: null },
+              });
+              await sendWhatsApp(
+                from,
+                "What would you like to do next?",
+                phone_number_id,
+              );
+              await sendMainMenu(from, phone_number_id);
               return;
             }
 
