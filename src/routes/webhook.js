@@ -971,7 +971,7 @@ router.post("/callback", async (req, res) => {
                     bankName,
                     step: isNigeria
                       ? "ENTER_ACCOUNT_NUMBER"
-                      : "ENTER_ACCOUNT_NAME",
+                      : "ENTER_ACCOUNT_NUMBER_OTHER",
                   },
                 },
               });
@@ -989,7 +989,7 @@ router.post("/callback", async (req, res) => {
               } else {
                 await sendWhatsApp(
                   from,
-                  `🏦 You selected *${bankName}*.\n\nPlease enter your *Account Name*:`,
+                  `🏦 You selected *${bankName}*.\n\nPlease enter your *Account Number*:`,
                   phone_number_id,
                 );
               }
@@ -1676,45 +1676,94 @@ router.post("/callback", async (req, res) => {
             // (Only runs if session.data.authenticated === true)
             // ==========================================
 
-            const aiAnalysis = await analyzeUserIntent(rawText, session.data);
-            console.log("AI Intent:", aiAnalysis.intent);
+            // const aiAnalysis = await analyzeUserIntent(rawText, session.data);
+            // console.log("AI Intent:", aiAnalysis.intent);
 
-            // A. Handle Chit-chat or Confusion
-            if (aiAnalysis.intent === "CHITCHAT_OR_CLARIFY") {
-              await sendWhatsApp(
-                from,
-                aiAnalysis.replyMessage,
-                phone_number_id,
-              );
-              return;
-            }
+            // // A. Handle Chit-chat or Confusion
+            // if (aiAnalysis.intent === "CHITCHAT_OR_CLARIFY") {
+            //   await sendWhatsApp(
+            //     from,
+            //     aiAnalysis.replyMessage,
+            //     phone_number_id,
+            //   );
+            //   return;
+            // }
 
-            // B. Handle Flow Cancellations
-            if (aiAnalysis.intent === "CANCEL_FLOW") {
-              await updateSession(from, {
-                data: {
-                  ...session.data,
-                  pendingDeposit: false,
-                  awaitingDepositPin: false,
-                  swap: null,
-                  send: null,
-                  withdraw: null,
-                  receive: null,
-                },
-              });
-              await sendWhatsApp(
-                from,
-                "Okay, I've canceled that for you.",
-                phone_number_id,
-              );
-              await sendMainMenu(from, phone_number_id);
-              return;
-            }
+            // // B. Handle Flow Cancellations
+            // if (aiAnalysis.intent === "CANCEL_FLOW") {
+            //   await updateSession(from, {
+            //     data: {
+            //       ...session.data,
+            //       pendingDeposit: false,
+            //       awaitingDepositPin: false,
+            //       swap: null,
+            //       send: null,
+            //       withdraw: null,
+            //       receive: null,
+            //     },
+            //   });
+            //   await sendWhatsApp(
+            //     from,
+            //     "Okay, I've canceled that for you.",
+            //     phone_number_id,
+            //   );
+            //   await sendMainMenu(from, phone_number_id);
+            //   return;
+            // }
 
-            // C. Handle new menu requests
-            if (aiAnalysis.intent === "START_NEW_FLOW") {
-              await sendMainMenu(from, phone_number_id);
-              return;
+            // // C. Handle new menu requests
+            // if (aiAnalysis.intent === "START_NEW_FLOW") {
+            //   await sendMainMenu(from, phone_number_id);
+            //   return;
+            // }
+
+            const isInWithdrawFlow = [
+              "ENTER_AMOUNT",
+              "ENTER_QUOTE_PIN",
+              "ENTER_ACCOUNT_NUMBER_OTHER",
+              "ENTER_ACCOUNT_NAME",
+              "ENTER_ACCOUNT_NUMBER",
+              "ENTER_EXECUTE_PIN",
+            ].includes(session.data?.withdraw?.step);
+
+            if (!isInWithdrawFlow) {
+              const aiAnalysis = await analyzeUserIntent(rawText, session.data);
+              console.log("AI Intent:", aiAnalysis.intent);
+
+              if (aiAnalysis.intent === "CHITCHAT_OR_CLARIFY") {
+                await sendWhatsApp(
+                  from,
+                  aiAnalysis.replyMessage,
+                  phone_number_id,
+                );
+                return;
+              }
+
+              if (aiAnalysis.intent === "CANCEL_FLOW") {
+                await updateSession(from, {
+                  data: {
+                    ...session.data,
+                    pendingDeposit: false,
+                    awaitingDepositPin: false,
+                    swap: null,
+                    send: null,
+                    withdraw: null,
+                    receive: null,
+                  },
+                });
+                await sendWhatsApp(
+                  from,
+                  "Okay, I've canceled that for you.",
+                  phone_number_id,
+                );
+                await sendMainMenu(from, phone_number_id);
+                return;
+              }
+
+              if (aiAnalysis.intent === "START_NEW_FLOW") {
+                await sendMainMenu(from, phone_number_id);
+                return;
+              }
             }
 
             if (session.data?.pendingDeposit) {
@@ -2358,6 +2407,37 @@ Once you’ve completed the transfer, tap *Confirm Payment* below.`,
               return;
             }
 
+            // if (session.data?.withdraw?.step === "ENTER_ACCOUNT_NAME") {
+            //   const accountName = msg.text?.body?.trim();
+
+            //   if (!accountName || accountName.length < 2) {
+            //     await sendWhatsApp(
+            //       from,
+            //       "⚠️ Please enter a valid account name.",
+            //       phone_number_id,
+            //     );
+            //     return;
+            //   }
+
+            //   await updateSession(from, {
+            //     data: {
+            //       ...session.data,
+            //       withdraw: {
+            //         ...session.data.withdraw,
+            //         accountName,
+            //         step: "ENTER_ACCOUNT_NUMBER_OTHER",
+            //       },
+            //     },
+            //   });
+
+            //   await sendWhatsApp(
+            //     from,
+            //     "🔢 Please enter your *Account Number*:",
+            //     phone_number_id,
+            //   );
+            //   return;
+            // }
+
             if (session.data?.withdraw?.step === "ENTER_ACCOUNT_NAME") {
               const accountName = msg.text?.body?.trim();
 
@@ -2370,38 +2450,7 @@ Once you’ve completed the transfer, tap *Confirm Payment* below.`,
                 return;
               }
 
-              await updateSession(from, {
-                data: {
-                  ...session.data,
-                  withdraw: {
-                    ...session.data.withdraw,
-                    accountName,
-                    step: "ENTER_ACCOUNT_NUMBER_OTHER",
-                  },
-                },
-              });
-
-              await sendWhatsApp(
-                from,
-                "🔢 Please enter your *Account Number*:",
-                phone_number_id,
-              );
-              return;
-            }
-
-            if (session.data?.withdraw?.step === "ENTER_ACCOUNT_NUMBER_OTHER") {
-              const accountNumber = msg.text?.body?.trim();
-
-              if (!accountNumber || accountNumber.length < 4) {
-                await sendWhatsApp(
-                  from,
-                  "⚠️ Please enter a valid account number.",
-                  phone_number_id,
-                );
-                return;
-              }
-
-              const { coin, amount, accountName, networkId, channelId } =
+              const { coin, amount, accountNumber, networkId, channelId, pin } =
                 session.data.withdraw;
 
               const execRes = await executeWithdrawal({
@@ -2411,7 +2460,7 @@ Once you’ve completed the transfer, tap *Confirm Payment* below.`,
                 accountName,
                 networkId,
                 channelId,
-                pin: session.data.withdraw.pin,
+                pin,
               });
 
               if (!execRes.success) {
@@ -2445,6 +2494,95 @@ Once you’ve completed the transfer, tap *Confirm Payment* below.`,
                 phone_number_id,
               );
               await sendMainMenu(from, phone_number_id);
+              return;
+            }
+
+            // if (session.data?.withdraw?.step === "ENTER_ACCOUNT_NUMBER_OTHER") {
+            //   const accountNumber = msg.text?.body?.trim();
+
+            //   if (!accountNumber || accountNumber.length < 4) {
+            //     await sendWhatsApp(
+            //       from,
+            //       "⚠️ Please enter a valid account number.",
+            //       phone_number_id,
+            //     );
+            //     return;
+            //   }
+
+            //   const { coin, amount, accountName, networkId, channelId } =
+            //     session.data.withdraw;
+
+            //   const execRes = await executeWithdrawal({
+            //     coin,
+            //     amount,
+            //     accountNumber,
+            //     accountName,
+            //     networkId,
+            //     channelId,
+            //     pin: session.data.withdraw.pin,
+            //   });
+
+            //   if (!execRes.success) {
+            //     const rawError =
+            //       execRes.error?.message || "Unknown server error";
+            //     const friendlyMessage = await humanizeError(
+            //       rawError,
+            //       "execute a bank withdrawal",
+            //     );
+            //     await sendWhatsApp(from, friendlyMessage, phone_number_id);
+            //     await updateSession(from, {
+            //       data: { ...session.data, withdraw: null },
+            //     });
+            //     await sendMainMenu(from, phone_number_id);
+            //     return;
+            //   }
+
+            //   const result = execRes.data;
+            //   await sendWhatsApp(
+            //     from,
+            //     `✅ *Withdrawal Successful!*\n\nAmount: ${result.amount} ${result.coin}\nTo: ${accountName}\nAccount: ${accountNumber}\nRef: ${result.reference}\n\n🚀 Funds are on the way!`,
+            //     phone_number_id,
+            //   );
+
+            //   await updateSession(from, {
+            //     data: { ...session.data, withdraw: null },
+            //   });
+            //   await sendWhatsApp(
+            //     from,
+            //     "What would you like to do next?",
+            //     phone_number_id,
+            //   );
+            //   await sendMainMenu(from, phone_number_id);
+            //   return;
+            // }
+            if (session.data?.withdraw?.step === "ENTER_ACCOUNT_NUMBER_OTHER") {
+              const accountNumber = msg.text?.body?.trim();
+
+              if (!accountNumber || accountNumber.length < 4) {
+                await sendWhatsApp(
+                  from,
+                  "⚠️ Please enter a valid account number.",
+                  phone_number_id,
+                );
+                return;
+              }
+
+              await updateSession(from, {
+                data: {
+                  ...session.data,
+                  withdraw: {
+                    ...session.data.withdraw,
+                    accountNumber,
+                    step: "ENTER_ACCOUNT_NAME",
+                  },
+                },
+              });
+
+              await sendWhatsApp(
+                from,
+                "👤 Please enter your *Account Name*:",
+                phone_number_id,
+              );
               return;
             }
 
