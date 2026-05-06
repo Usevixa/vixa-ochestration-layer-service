@@ -1878,6 +1878,9 @@ router.post("/callback", async (req, res) => {
                 const formattedAmount =
                   depositData.amountToPayNgn?.toLocaleString("en-NG");
 
+                const accNo = depositData.accountNumber;
+                // const bank = depositData.bankName;
+
                 await sendWhatsApp(
                   from,
                   {
@@ -1891,7 +1894,7 @@ Please make a transfer using the details below:
 💰 *Amount:* ₦${formattedAmount}
 🏦 *Bank Name:* ${depositCypto?.data?.data?.bankName}  
 👤 *Account Name:* ${depositCypto?.data?.data?.accountName}  
-🔢 *Account Number:* ${depositCypto?.data?.data?.accountNumber}  
+🔢 *Account Number:* \`${accNo}\`
 🧾 *Reference:* ${depositCypto?.data?.data?.reference}
 ⏳ *Expires At:* ${formattedExpiry}
 
