@@ -1871,7 +1871,7 @@ router.post("/callback", async (req, res) => {
                   hour: "2-digit",
                   minute: "2-digit",
                   hour12: true,
-                  timeZone: "Africa/Lagos", // ✅ explicitly set to WAT
+                  timeZone: "Africa/Lagos",
                 });
 
                 // 2. Format Amount with commas (e.g., "14,000")
