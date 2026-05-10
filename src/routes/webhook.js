@@ -1728,7 +1728,12 @@ router.post("/callback", async (req, res) => {
 
             if (!isInWithdrawFlow) {
               const aiAnalysis = await analyzeUserIntent(rawText, session.data);
-              console.log("AI Intent:", aiAnalysis.intent);
+              console.log(
+                "AI Intent:",
+                aiAnalysis.intent,
+                "Flow:",
+                aiAnalysis.detectedFlow,
+              );
 
               if (aiAnalysis.intent === "CHITCHAT_OR_CLARIFY") {
                 await sendWhatsApp(
@@ -1739,28 +1744,244 @@ router.post("/callback", async (req, res) => {
                 return;
               }
 
-              if (aiAnalysis.intent === "CANCEL_FLOW") {
-                await updateSession(from, {
-                  data: {
-                    ...session.data,
-                    pendingDeposit: false,
-                    awaitingDepositPin: false,
-                    swap: null,
-                    send: null,
-                    withdraw: null,
-                    receive: null,
-                  },
-                });
-                await sendWhatsApp(
-                  from,
-                  "Okay, I've canceled that for you.",
-                  phone_number_id,
-                );
-                await sendMainMenu(from, phone_number_id);
-                return;
-              }
+              // Clear any active flow state before routing
+              const clearState = {
+                ...session.data,
+                pendingDeposit: false,
+                awaitingDepositPin: false,
+                awaitingDepositConfirmation: false,
+                swap: null,
+                send: null,
+                withdraw: null,
+                receive: null,
+              };
 
-              if (aiAnalysis.intent === "START_NEW_FLOW") {
+              if (
+                aiAnalysis.intent === "CANCEL_FLOW" ||
+                aiAnalysis.intent === "START_SPECIFIC_FLOW"
+              ) {
+                await updateSession(from, { data: clearState });
+
+                // Re-fetch session after clearing
+                const freshSession = await getSession(from);
+
+                const flow = aiAnalysis.detectedFlow;
+
+                // Route directly to the detected flow
+                if (flow === "DEPOSIT") {
+                  await updateSession(from, {
+                    data: {
+                      ...freshSession.data,
+                      pendingDeposit: true,
+                      depositCoin: "USDT",
+                      depositChain: "SOL",
+                      depositCurrency: "NGN",
+                    },
+                  });
+                  await sendWhatsApp(
+                    from,
+                    "💰 Please enter the amount in NGN you want to deposit for your USDT wallet:",
+                    phone_number_id,
+                  );
+                  return;
+                }
+
+                if (flow === "SWAP") {
+                  const currenciesRes = await fetchSwapCurrencies();
+                  if (!currenciesRes.success) {
+                    await sendWhatsApp(
+                      from,
+                      "⚠️ Unable to load swap currencies right now.",
+                      phone_number_id,
+                    );
+                    return;
+                  }
+                  const allCoins = currenciesRes?.data?.data?.currencies;
+                  const selectedCoins = pickPreferredCoins(
+                    allCoins,
+                    PREFERRED_COINS,
+                  );
+                  await updateSession(from, {
+                    data: {
+                      ...freshSession.data,
+                      swap: {
+                        step: "SELECT_FROM",
+                        allCoins: selectedCoins,
+                        currentFromPage: 0,
+                      },
+                    },
+                  });
+                  await sendPaginatedSwapCoinsMenu(
+                    from,
+                    phone_number_id,
+                    selectedCoins,
+                    0,
+                    "FROM",
+                  );
+                  return;
+                }
+
+                if (flow === "SEND") {
+                  await updateSession(from, {
+                    data: {
+                      ...freshSession.data,
+                      send: { step: "SELECT_SEND_TYPE" },
+                    },
+                  });
+                  await sendWhatsApp(
+                    from,
+                    {
+                      type: "interactive",
+                      interactive: {
+                        type: "list",
+                        body: { text: "Who are you sending to? 😊" },
+                        action: {
+                          button: "Choose recipient",
+                          sections: [
+                            {
+                              title: "Send Options",
+                              rows: [
+                                {
+                                  id: "SEND_TYPE_P2P",
+                                  title: "Another Vixa user",
+                                  description: "Send to a phone number",
+                                },
+                                {
+                                  id: "SEND_TYPE_EXTERNAL",
+                                  title: "External wallet",
+                                  description: "Send to blockchain address",
+                                },
+                              ],
+                            },
+                          ],
+                        },
+                      },
+                    },
+                    phone_number_id,
+                  );
+                  return;
+                }
+
+                if (flow === "WITHDRAW") {
+                  await updateSession(from, {
+                    data: {
+                      ...freshSession.data,
+                      withdraw: { step: "SELECT_WITHDRAW_REGION" },
+                    },
+                  });
+                  await sendWhatsApp(
+                    from,
+                    {
+                      type: "interactive",
+                      interactive: {
+                        type: "button",
+                        body: { text: "📍 Where are you withdrawing to?" },
+                        action: {
+                          buttons: [
+                            {
+                              type: "reply",
+                              reply: {
+                                id: "WITHDRAW_REGION_NG",
+                                title: "🇳🇬 Nigeria",
+                              },
+                            },
+                            {
+                              type: "reply",
+                              reply: {
+                                id: "WITHDRAW_REGION_OTHER",
+                                title: "🌍 Other Countries",
+                              },
+                            },
+                          ],
+                        },
+                      },
+                    },
+                    phone_number_id,
+                  );
+                  return;
+                }
+
+                if (flow === "RECEIVE") {
+                  const walletsRes = await fetchReceiveWallets();
+                  if (!walletsRes.success) {
+                    await sendWhatsApp(
+                      from,
+                      "⚠️ Unable to load receive options right now.",
+                      phone_number_id,
+                    );
+                    return;
+                  }
+                  const wallets = walletsRes?.data?.data?.data || [];
+                  if (!wallets.length) {
+                    await sendWhatsApp(
+                      from,
+                      "⚠️ No receive wallets available.",
+                      phone_number_id,
+                    );
+                    return;
+                  }
+                  const uniqueCoins = [...new Set(wallets.map((w) => w.coin))];
+                  const rows = uniqueCoins.slice(0, 10).map((coin) => ({
+                    id: `RECEIVE_COIN_${coin}`,
+                    title: coin,
+                    description: `Receive ${coin}`,
+                  }));
+                  await updateSession(from, {
+                    data: {
+                      ...freshSession.data,
+                      receive: { step: "SELECT_COIN", wallets },
+                    },
+                  });
+                  await sendWhatsApp(
+                    from,
+                    {
+                      type: "interactive",
+                      interactive: {
+                        type: "list",
+                        body: {
+                          text: "📥 Select the coin you want to receive",
+                        },
+                        action: {
+                          button: "Select coin",
+                          sections: [{ title: "Available Coins", rows }],
+                        },
+                      },
+                    },
+                    phone_number_id,
+                  );
+                  return;
+                }
+
+                if (flow === "BALANCE") {
+                  const me = await fetchAuthMe();
+                  const balances = await fetchWalletBalances();
+                  const now = new Date();
+                  const formattedDate = now.toLocaleDateString("en-US", {
+                    month: "short",
+                    day: "numeric",
+                    year: "numeric",
+                  });
+                  let balanceText = `Hi ${me.firstName} 👋\n\n💼 *Your Wallet Balances*\n\n`;
+                  if (!balances || balances.length === 0) {
+                    balanceText += "You currently have no wallet balances.\n";
+                  } else {
+                    for (const bal of balances) {
+                      balanceText += `• ${bal.coin}: ${bal.balance}\n`;
+                    }
+                  }
+                  balanceText += `\n📅 Last updated: ${formattedDate}`;
+                  await sendWhatsApp(from, balanceText, phone_number_id);
+                  return;
+                }
+
+                // No specific flow detected → just cancel and show menu
+                if (aiAnalysis.intent === "CANCEL_FLOW") {
+                  await sendWhatsApp(
+                    from,
+                    "Okay, I've canceled that for you.",
+                    phone_number_id,
+                  );
+                }
                 await sendMainMenu(from, phone_number_id);
                 return;
               }
