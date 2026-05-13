@@ -40,6 +40,7 @@ const WHATSAPP_TOKEN =
   "EAAYMlHAusnwBRDx6KHY8bAZBkuqMP773wYlbnkLnsKOXxxHXNs9qc9DORyAYVxdQkJrr0zprJ3aX37K1HhFal619ntMwbUOZBU3iXSvxVWP4P0RdgJQkbrgPph6TR5e5Dl4utr4gJsUy8xODgCRAEAmllx7iubbCKo0qFJq12xvMO5IZAtJIO4e3ejZCsQZDZD";
 const VERIFY_TOKEN = process.env.WHATSAPP_VERIFY_TOKEN;
 const FLOW_ID = "1462140848896803";
+const PIN_FLOW_ID = "1571906007827358";
 const WHATSAPP_API_VERSION = "v25.0";
 
 function formatDobToISO(dob) {
@@ -188,11 +189,13 @@ router.post("/callback", async (req, res) => {
                 },
               });
 
-              await sendWhatsApp(
-                from,
-                "⏳ Your session has expired for your security.\n\nPlease enter your *4-digit PIN* to securely log back in.",
-                phone_number_id,
-              );
+              // await sendWhatsApp(
+              //   from,
+              //   "⏳ Your session has expired for your security.\n\nPlease enter your *4-digit PIN* to securely log back in.",
+              //   phone_number_id,
+              // );
+
+              await triggerPinFlow(from, phone_number_id, "LOGIN");
 
               continue; // Stop processing this message. Force them to log in.
             }
@@ -420,7 +423,7 @@ router.post("/callback", async (req, res) => {
                   `🔐 Please enter your *PIN* to authorize this swap.`,
                 phone_number_id,
               );
-
+              await triggerPinFlow(from, phone_number_id, "SWAP");
               return;
             }
 
@@ -1585,11 +1588,12 @@ router.post("/callback", async (req, res) => {
                   },
                 },
               });
-              await sendWhatsApp(
-                from,
-                "🔐 Enter your *4-digit PIN* to execute this withdrawal:",
-                phone_number_id,
-              );
+              // await sendWhatsApp(
+              //   from,
+              //   "🔐 Enter your *4-digit PIN* to execute this withdrawal:",
+              //   phone_number_id,
+              // );
+              await triggerPinFlow(from, phone_number_id, "WITHDRAW_EXECUTE");
               return;
             }
             continue;
@@ -1658,11 +1662,12 @@ router.post("/callback", async (req, res) => {
                     pinAttempts: 0,
                   },
                 });
-                await sendWhatsApp(
-                  from,
-                  "🔐 Welcome back to VIXA!\n\nPlease enter your *4-digit PIN* to continue.",
-                  phone_number_id,
-                );
+                // await sendWhatsApp(
+                //   from,
+                //   "🔐 Welcome back to VIXA!\n\nPlease enter your *4-digit PIN* to continue.",
+                //   phone_number_id,
+                // );
+                await triggerPinFlow(from, phone_number_id, "LOGIN");
               } else {
                 // User does not exist -> Trigger Onboarding
                 await triggerFlow(from, phone_number_id);
@@ -2049,109 +2054,111 @@ router.post("/callback", async (req, res) => {
                 },
               });
 
-              await sendWhatsApp(
-                from,
-                "🔐 Please enter your *4-digit PIN* to confirm this deposit.",
-                phone_number_id,
-              );
+              // await sendWhatsApp(
+              //   from,
+              //   "🔐 Please enter your *4-digit PIN* to confirm this deposit.",
+              //   phone_number_id,
+              // );
+              await triggerPinFlow(from, phone_number_id, "DEPOSIT");
               return;
             }
 
-            if (session.data?.awaitingDepositPin) {
-              const pin = msg.text?.body?.trim();
+//             if (session.data?.awaitingDepositPin) {
+//               const pin = msg.text?.body?.trim();
 
-              if (!pin || pin.length !== 4) {
-                await sendWhatsApp(
-                  from,
-                  "⚠️ Please enter a valid 4-digit PIN.",
-                  phone_number_id,
-                );
-                return;
-              }
-              // Call depositCrypto
-              const depositCypto = await depositCrypto({
-                currency: session.data.depositCurrency,
-                amountNgn: session.data.depositAmount,
-                channelId: "AF944F0C-BA70-47C7-86DC-1BAD5A6AB4E4",
-                coin: session.data.depositCoin,
-                // chain: session.data.depositChain,
-                correlationId: `CORR-${Date.now()}`,
-                idempotencyKey: `IDEMPOTENCY-${Date.now()}`,
-                pin,
-              });
+//               if (!pin || pin.length !== 4) {
+//                 await sendWhatsApp(
+//                   from,
+//                   "⚠️ Please enter a valid 4-digit PIN.",
+//                   phone_number_id,
+//                 );
+//                 return;
+//               }
+//               // Call depositCrypto
+//               const depositCypto = await depositCrypto({
+//                 currency: session.data.depositCurrency,
+//                 amountNgn: session.data.depositAmount,
+//                 channelId: "AF944F0C-BA70-47C7-86DC-1BAD5A6AB4E4",
+//                 coin: session.data.depositCoin,
+//                 // chain: session.data.depositChain,
+//                 correlationId: `CORR-${Date.now()}`,
+//                 idempotencyKey: `IDEMPOTENCY-${Date.now()}`,
+//                 pin,
+//               });
 
-              console.log(depositCypto, "depositCryptodepositCrypto");
+//               console.log(depositCypto, "depositCryptodepositCrypto");
 
-              if (depositCypto.success) {
-                const depositData = depositCypto.data.data;
+//               if (depositCypto.success) {
+//                 const depositData = depositCypto.data.data;
 
-                // 1. Format Expiry Time (e.g., "12:14 PM")
-                const expiryDate = new Date(depositData.expiresAtUtc);
-                const formattedExpiry = expiryDate.toLocaleTimeString("en-NG", {
-                  hour: "2-digit",
-                  minute: "2-digit",
-                  hour12: true,
-                  timeZone: "Africa/Lagos",
-                });
+//                 // 1. Format Expiry Time (e.g., "12:14 PM")
+//                 const expiryDate = new Date(depositData.expiresAtUtc);
+//                 const formattedExpiry = expiryDate.toLocaleTimeString("en-NG", {
+//                   hour: "2-digit",
+//                   minute: "2-digit",
+//                   hour12: true,
+//                   timeZone: "Africa/Lagos",
+//                 });
 
-                // 2. Format Amount with commas (e.g., "14,000")
-                const formattedAmount =
-                  depositData.amountToPayNgn?.toLocaleString("en-NG");
+//                 // 2. Format Amount with commas (e.g., "14,000")
+//                 const formattedAmount =
+//                   depositData.amountToPayNgn?.toLocaleString("en-NG");
 
-                const accNo = depositData.accountNumber;
-                // const bank = depositData.bankName;
+//                 const accNo = depositData.accountNumber;
+//                 // const bank = depositData.bankName;
 
-                await sendWhatsApp(
-                  from,
-                  {
-                    type: "interactive",
-                    interactive: {
-                      type: "button",
-                      body: {
-                        text: `✅ *Deposit Initiated*
+//                 await sendWhatsApp(
+//                   from,
+//                   {
+//                     type: "interactive",
+//                     interactive: {
+//                       type: "button",
+//                       body: {
+//                         text: `✅ *Deposit Initiated*
 
-Please make a transfer using the details below:
-💰 *Amount:* ₦${formattedAmount}
-🏦 *Bank Name:* ${depositCypto?.data?.data?.bankName}  
-👤 *Account Name:* ${depositCypto?.data?.data?.accountName}  
-🔢 *Account Number:* \`${accNo}\`
-🧾 *Reference:* ${depositCypto?.data?.data?.reference}
-⏳ *Expires At:* ${formattedExpiry}
+// Please make a transfer using the details below:
+// 💰 *Amount:* ₦${formattedAmount}
+// 🏦 *Bank Name:* ${depositCypto?.data?.data?.bankName}  
+// 👤 *Account Name:* ${depositCypto?.data?.data?.accountName}  
+// 🔢 *Account Number:* \`${accNo}\`
+// 🧾 *Reference:* ${depositCypto?.data?.data?.reference}
+// ⏳ *Expires At:* ${formattedExpiry}
 
-Once you’ve completed the transfer, tap *Confirm Payment* below.`,
-                      },
-                      action: {
-                        buttons: [
-                          {
-                            type: "reply",
-                            reply: {
-                              id: "CONFIRM_DEPOSIT_PAYMENT",
-                              title: "Confirm Payment",
-                            },
-                          },
-                        ],
-                      },
-                    },
-                  },
-                  phone_number_id,
-                );
+// Once you’ve completed the transfer, tap *Confirm Payment* below.`,
+//                       },
+//                       action: {
+//                         buttons: [
+//                           {
+//                             type: "reply",
+//                             reply: {
+//                               id: "CONFIRM_DEPOSIT_PAYMENT",
+//                               title: "Confirm Payment",
+//                             },
+//                           },
+//                         ],
+//                       },
+//                     },
+//                   },
+//                   phone_number_id,
+//                 );
 
-                await updateSession(from, {
-                  data: {
-                    ...session.data,
-                    pendingDeposit: false,
-                    awaitingDepositConfirmation: true,
-                    awaitingDepositPin: false,
-                    depositReference: depositCypto?.data?.data?.reference,
-                    depositAmount: session.data.depositAmount,
-                    depositCoin: session.data.depositCoin,
-                    id: session.data.id,
-                  },
-                });
-              }
+//                 await updateSession(from, {
+//                   data: {
+//                     ...session.data,
+//                     pendingDeposit: false,
+//                     awaitingDepositConfirmation: true,
+//                     awaitingDepositPin: false,
+//                     depositReference: depositCypto?.data?.data?.reference,
+//                     depositAmount: session.data.depositAmount,
+//                     depositCoin: session.data.depositCoin,
+//                     id: session.data.id,
+//                   },
+//                 });
+//               }
 
-              return; // Stop further processing
-            }
+//               return; // Stop further processing
+//             }
+
 
             //             if (session.data?.awaitingDepositConfirmation) {
             //               const confirmDeposit = await confirmPayment({
@@ -2232,74 +2239,74 @@ Once you’ve completed the transfer, tap *Confirm Payment* below.`,
               return;
             }
 
-            if (session.data?.swap?.step === "AWAITING_SWAP_PIN") {
-              const pin = msg.text?.body?.trim();
+            // if (session.data?.swap?.step === "AWAITING_SWAP_PIN") {
+            //   const pin = msg.text?.body?.trim();
 
-              if (!pin || pin.length < 4) {
-                await sendWhatsApp(
-                  from,
-                  "⚠️ Enter a valid PIN.",
-                  phone_number_id,
-                );
-                return;
-              }
+            //   if (!pin || pin.length < 4) {
+            //     await sendWhatsApp(
+            //       from,
+            //       "⚠️ Enter a valid PIN.",
+            //       phone_number_id,
+            //     );
+            //     return;
+            //   }
 
-              const { fromCoin, amount, toCoin } = session.data.swap;
+            //   const { fromCoin, amount, toCoin } = session.data.swap;
 
-              const swapResult = await executeSwap({
-                fromCoin,
-                fromAmount: amount,
-                toCoin,
-                pin,
-              });
+            //   const swapResult = await executeSwap({
+            //     fromCoin,
+            //     fromAmount: amount,
+            //     toCoin,
+            //     pin,
+            //   });
 
-              console.log(swapResult, "swapResultswapResult");
+            //   console.log(swapResult, "swapResultswapResult");
 
-              if (!swapResult.success) {
-                const rawError =
-                  swapResult.error?.message || "Unknown server error";
-                const friendlyMessage = await humanizeError(
-                  rawError,
-                  "execute a crypto swap",
-                );
+            //   if (!swapResult.success) {
+            //     const rawError =
+            //       swapResult.error?.message || "Unknown server error";
+            //     const friendlyMessage = await humanizeError(
+            //       rawError,
+            //       "execute a crypto swap",
+            //     );
 
-                await sendWhatsApp(from, friendlyMessage, phone_number_id);
+            //     await sendWhatsApp(from, friendlyMessage, phone_number_id);
 
-                await sendWhatsApp(
-                  from,
-                  "What would you like to do next?",
-                  phone_number_id,
-                );
+            //     await sendWhatsApp(
+            //       from,
+            //       "What would you like to do next?",
+            //       phone_number_id,
+            //     );
 
-                await sendMainMenu(from, phone_number_id);
-                return;
-              }
+            //     await sendMainMenu(from, phone_number_id);
+            //     return;
+            //   }
 
-              await sendWhatsApp(
-                from,
-                `✅ *Swap Successful!*\n\n` +
-                  `${amount} ${fromCoin} → ${swapResult.data.data.toAmount} ${toCoin}\n\n` +
-                  `🎉 Your wallet has been updated.`,
-                phone_number_id,
-              );
+            //   await sendWhatsApp(
+            //     from,
+            //     `✅ *Swap Successful!*\n\n` +
+            //       `${amount} ${fromCoin} → ${swapResult.data.data.toAmount} ${toCoin}\n\n` +
+            //       `🎉 Your wallet has been updated.`,
+            //     phone_number_id,
+            //   );
 
-              // Reset swap state
-              await updateSession(from, {
-                data: {
-                  ...session.data,
-                  swap: null,
-                },
-              });
+            //   // Reset swap state
+            //   await updateSession(from, {
+            //     data: {
+            //       ...session.data,
+            //       swap: null,
+            //     },
+            //   });
 
-              await sendWhatsApp(
-                from,
-                "What would you like to do next?",
-                phone_number_id,
-              );
-              await sendMainMenu(from, phone_number_id);
+            //   await sendWhatsApp(
+            //     from,
+            //     "What would you like to do next?",
+            //     phone_number_id,
+            //   );
+            //   await sendMainMenu(from, phone_number_id);
 
-              return;
-            }
+            //   return;
+            // }
 
             if (session.data?.send?.step === "ENTER_AMOUNT") {
               console.log("amount is logged", msg.text?.body);
@@ -2419,11 +2426,12 @@ Once you’ve completed the transfer, tap *Confirm Payment* below.`,
                 return;
               }
 
-              await sendWhatsApp(
-                from,
-                "🔐 Enter your *PIN* to confirm this transfer",
-                phone_number_id,
-              );
+              // await sendWhatsApp(
+              //   from,
+              //   "🔐 Enter your *PIN* to confirm this transfer",
+              //   phone_number_id,
+              // );
+              await triggerPinFlow(from, phone_number_id, "SEND");
 
               return;
             }
@@ -2451,82 +2459,83 @@ Once you’ve completed the transfer, tap *Confirm Payment* below.`,
                 },
               });
 
-              await sendWhatsApp(
-                from,
-                "🔐 Enter your *PIN* to confirm this transfer",
-                phone_number_id,
-              );
+              // await sendWhatsApp(
+              //   from,
+              //   "🔐 Enter your *PIN* to confirm this transfer",
+              //   phone_number_id,
+              // );
+              await triggerPinFlow(from, phone_number_id, "SEND");
 
               return;
             }
 
-            if (session.data?.send?.step === "ENTER_PIN") {
-              const pin = msg.text?.body?.trim();
+            // if (session.data?.send?.step === "ENTER_PIN") {
+            //   const pin = msg.text?.body?.trim();
 
-              if (!pin || pin.length < 4) {
-                await sendWhatsApp(
-                  from,
-                  "⚠️ Enter a valid PIN.",
-                  phone_number_id,
-                );
-                return;
-              }
+            //   if (!pin || pin.length < 4) {
+            //     await sendWhatsApp(
+            //       from,
+            //       "⚠️ Enter a valid PIN.",
+            //       phone_number_id,
+            //     );
+            //     return;
+            //   }
 
-              const { coin, amount, address, chain, type } = session.data.send;
+            //   const { coin, amount, address, chain, type } = session.data.send;
 
-              // WhatsApp number of sender
-              const userPhone = from;
+            //   // WhatsApp number of sender
+            //   const userPhone = from;
 
-              const sendRes = await executeSendCrypto({
-                type,
-                coin,
-                chain: chain?.chain,
-                amount,
-                phoneNumber: userPhone,
-                externalAddress: address,
-                pin,
-              });
+            //   const sendRes = await executeSendCrypto({
+            //     type,
+            //     coin,
+            //     chain: chain?.chain,
+            //     amount,
+            //     phoneNumber: userPhone,
+            //     externalAddress: address,
+            //     pin,
+            //   });
 
-              console.log(sendRes, "checking send crypto");
+            //   console.log(sendRes, "checking send crypto");
 
-              if (!sendRes.success) {
-                const rawError =
-                  sendRes.error?.message || "Unknown server error";
-                const friendlyMessage = await humanizeError(
-                  rawError,
-                  "send crypto to an external address",
-                );
+            //   if (!sendRes.success) {
+            //     const rawError =
+            //       sendRes.error?.message || "Unknown server error";
+            //     const friendlyMessage = await humanizeError(
+            //       rawError,
+            //       "send crypto to an external address",
+            //     );
 
-                await sendWhatsApp(from, friendlyMessage, phone_number_id);
-                return;
-              }
+            //     await sendWhatsApp(from, friendlyMessage, phone_number_id);
+            //     return;
+            //   }
 
-              await sendWhatsApp(
-                from,
-                `✅ *Transfer Successful!*\n\n` +
-                  `${amount} ${coin} sent\n` +
-                  `To: ${address}\n\n` +
-                  `🚀 Transaction submitted`,
-                phone_number_id,
-              );
+            //   await sendWhatsApp(
+            //     from,
+            //     `✅ *Transfer Successful!*\n\n` +
+            //       `${amount} ${coin} sent\n` +
+            //       `To: ${address}\n\n` +
+            //       `🚀 Transaction submitted`,
+            //     phone_number_id,
+            //   );
 
-              // Reset send state
-              await updateSession(from, {
-                data: {
-                  ...session.data,
-                  send: null,
-                },
-              });
+            //   // Reset send state
+            //   await updateSession(from, {
+            //     data: {
+            //       ...session.data,
+            //       send: null,
+            //     },
+            //   });
 
-              await sendWhatsApp(
-                from,
-                "What would you like to do next?",
-                phone_number_id,
-              );
+            //   await sendWhatsApp(
+            //     from,
+            //     "What would you like to do next?",
+            //     phone_number_id,
+            //   );
 
-              await sendMainMenu(from, phone_number_id);
-              return;
-            }
+            //   await sendMainMenu(from, phone_number_id);
+            //   return;
+            // }
 
             // --- WITHDRAW FLOW LOGIC ---
             if (session.data?.withdraw?.step === "ENTER_AMOUNT") {
@@ -2549,86 +2558,87 @@ Once you’ve completed the transfer, tap *Confirm Payment* below.`,
                   },
                 },
               });
-              await sendWhatsApp(
-                from,
-                "🔐 Enter your *4-digit PIN* to generate a quote:",
-                phone_number_id,
-              );
+              // await sendWhatsApp(
+              //   from,
+              //   "🔐 Enter your *4-digit PIN* to generate a quote:",
+              //   phone_number_id,
+              // );
+              await triggerPinFlow(from, phone_number_id, "WITHDRAW_QUOTE");
               return;
             }
 
-            if (session.data?.withdraw?.step === "ENTER_QUOTE_PIN") {
-              console.log(session, "qoute session");
-              const pin = msg.text?.body?.trim();
-              console.log(pin, pin?.length);
-              if (pin.length < 4) {
-                await sendWhatsApp(from, "⚠️ Invalid PIN.", phone_number_id);
-                return;
-              }
+            // if (session.data?.withdraw?.step === "ENTER_QUOTE_PIN") {
+            //   console.log(session, "qoute session");
+            //   const pin = msg.text?.body?.trim();
+            //   console.log(pin, pin?.length);
+            //   if (pin.length < 4) {
+            //     await sendWhatsApp(from, "⚠️ Invalid PIN.", phone_number_id);
+            //     return;
+            //   }
 
-              const { coin, amount, channelId } = session.data.withdraw;
+            //   const { coin, amount, channelId } = session.data.withdraw;
 
-              const quoteRes = await fetchWithdrawalQuote({
-                coin,
-                amount,
-                channelId,
-                pin,
-              });
+            //   const quoteRes = await fetchWithdrawalQuote({
+            //     coin,
+            //     amount,
+            //     channelId,
+            //     pin,
+            //   });
 
-              if (!quoteRes.success) {
-                const rawError =
-                  quoteRes.error?.message || "Unknown server error";
-                const friendlyMessage = await humanizeError(
-                  rawError,
-                  "get a withdrawal quote",
-                );
-                await sendWhatsApp(from, friendlyMessage, phone_number_id);
-                return;
-              }
+            //   if (!quoteRes.success) {
+            //     const rawError =
+            //       quoteRes.error?.message || "Unknown server error";
+            //     const friendlyMessage = await humanizeError(
+            //       rawError,
+            //       "get a withdrawal quote",
+            //     );
+            //     await sendWhatsApp(from, friendlyMessage, phone_number_id);
+            //     return;
+            //   }
 
-              const q = quoteRes.data;
-              const msgText = `📊 *Withdrawal Quote*\n\nWithdrawing: ${q.coinAmount} ${q.coin}\nEstimated ${q.fiatCurrency}: ${q.estimatedFiat} ${q.fiatCurrency}\nFees: ${q.totalFees}\n\nDo you want to proceed?`;
+            //   const q = quoteRes.data;
+            //   const msgText = `📊 *Withdrawal Quote*\n\nWithdrawing: ${q.coinAmount} ${q.coin}\nEstimated ${q.fiatCurrency}: ${q.estimatedFiat} ${q.fiatCurrency}\nFees: ${q.totalFees}\n\nDo you want to proceed?`;
 
-              await updateSession(from, {
-                data: {
-                  ...session.data,
-                  withdraw: {
-                    ...session.data.withdraw,
-                    channelId,
-                    pin, // ← save PIN here so we can reuse it later
-                    step: "AWAITING_QUOTE_CONFIRM",
-                  },
-                },
-              });
+            //   await updateSession(from, {
+            //     data: {
+            //       ...session.data,
+            //       withdraw: {
+            //         ...session.data.withdraw,
+            //         channelId,
+            //         pin, // ← save PIN here so we can reuse it later
+            //         step: "AWAITING_QUOTE_CONFIRM",
+            //       },
+            //     },
+            //   });
 
-              await sendWhatsApp(
-                from,
-                {
-                  type: "interactive",
-                  interactive: {
-                    type: "button",
-                    body: { text: msgText },
-                    action: {
-                      buttons: [
-                        {
-                          type: "reply",
-                          reply: {
-                            id: "QUOTE_CONFIRM_YES",
-                            title: "Yes, Proceed",
-                          },
-                        },
-                        {
-                          type: "reply",
-                          reply: { id: "WITHDRAW_CANCEL", title: "Cancel" },
-                        },
-                      ],
-                    },
-                  },
-                },
-                phone_number_id,
-              );
-              return;
-            }
+            //   await sendWhatsApp(
+            //     from,
+            //     {
+            //       type: "interactive",
+            //       interactive: {
+            //         type: "button",
+            //         body: { text: msgText },
+            //         action: {
+            //           buttons: [
+            //             {
+            //               type: "reply",
+            //               reply: {
+            //                 id: "QUOTE_CONFIRM_YES",
+            //                 title: "Yes, Proceed",
+            //               },
+            //             },
+            //             {
+            //               type: "reply",
+            //               reply: { id: "WITHDRAW_CANCEL", title: "Cancel" },
+            //             },
+            //           ],
+            //         },
+            //       },
+            //     },
+            //     phone_number_id,
+            //   );
+            //   return;
+            // }
 
             // if (session.data?.withdraw?.step === "ENTER_ACCOUNT_NAME") {
             //   const accountName = msg.text?.body?.trim();
@@ -2882,66 +2892,66 @@ Once you’ve completed the transfer, tap *Confirm Payment* below.`,
               return;
             }
 
-            if (session.data?.withdraw?.step === "ENTER_EXECUTE_PIN") {
-              const pin = msg.text?.body?.trim();
-              if (pin.length < 4) {
-                await sendWhatsApp(from, "⚠️ Invalid PIN.", phone_number_id);
-                return;
-              }
+            // if (session.data?.withdraw?.step === "ENTER_EXECUTE_PIN") {
+            //   const pin = msg.text?.body?.trim();
+            //   if (pin.length < 4) {
+            //     await sendWhatsApp(from, "⚠️ Invalid PIN.", phone_number_id);
+            //     return;
+            //   }
 
-              const {
-                coin,
-                amount,
-                accountNumber,
-                accountName,
-                networkId,
-                channelId,
-              } = session.data.withdraw;
+            //   const {
+            //     coin,
+            //     amount,
+            //     accountNumber,
+            //     accountName,
+            //     networkId,
+            //     channelId,
+            //   } = session.data.withdraw;
 
-              const execRes = await executeWithdrawal({
-                coin,
-                amount,
-                accountNumber,
-                accountName,
-                networkId,
-                channelId,
-                pin,
-              });
+            //   const execRes = await executeWithdrawal({
+            //     coin,
+            //     amount,
+            //     accountNumber,
+            //     accountName,
+            //     networkId,
+            //     channelId,
+            //     pin,
+            //   });
 
-              if (!execRes.success) {
-                const rawError =
-                  execRes.error?.message || "Unknown server error";
-                const friendlyMessage = await humanizeError(
-                  rawError,
-                  "execute a bank withdrawal",
-                );
-                await sendWhatsApp(from, friendlyMessage, phone_number_id);
-                await updateSession(from, {
-                  data: { ...session.data, withdraw: null },
-                });
-                await sendMainMenu(from, phone_number_id);
-                return;
-              }
+            //   if (!execRes.success) {
+            //     const rawError =
+            //       execRes.error?.message || "Unknown server error";
+            //     const friendlyMessage = await humanizeError(
+            //       rawError,
+            //       "execute a bank withdrawal",
+            //     );
+            //     await sendWhatsApp(from, friendlyMessage, phone_number_id);
+            //     await updateSession(from, {
+            //       data: { ...session.data, withdraw: null },
+            //     });
+            //     await sendMainMenu(from, phone_number_id);
+            //     return;
+            //   }
 
-              const result = execRes.data;
-              await sendWhatsApp(
-                from,
-                `✅ *Withdrawal Successful!*\n\nAmount: ${result.amount} ${result.coin}\nTo: ${result.accountName}\nBank: ${result.bankName}\nRef: ${result.reference}\n\n🚀 Funds are on the way!`,
-                phone_number_id,
-              );
+            //   const result = execRes.data;
+            //   await sendWhatsApp(
+            //     from,
+            //     `✅ *Withdrawal Successful!*\n\nAmount: ${result.amount} ${result.coin}\nTo: ${result.accountName}\nBank: ${result.bankName}\nRef: ${result.reference}\n\n🚀 Funds are on the way!`,
+            //     phone_number_id,
+            //   );
 
-              // Clear state
-              await updateSession(from, {
-                data: { ...session.data, withdraw: null },
-              });
-              await sendWhatsApp(
-                from,
-                "What would you like to do next?",
-                phone_number_id,
-              );
-              await sendMainMenu(from, phone_number_id);
-              return;
-            }
+            //   // Clear state
+            //   await updateSession(from, {
+            //     data: { ...session.data, withdraw: null },
+            //   });
+            //   await sendWhatsApp(
+            //     from,
+            //     "What would you like to do next?",
+            //     phone_number_id,
+            //   );
+            //   await sendMainMenu(from, phone_number_id);
+            //   return;
+            // }
 
             if (session.data?.authenticated) {
               await sendMainMenu(from, phone_number_id);
@@ -2995,11 +3005,12 @@ Once you’ve completed the transfer, tap *Confirm Payment* below.`,
                 },
               });
 
-              await sendWhatsApp(
-                from,
-                "🔐 Welcome back to VIXA!\n\nPlease enter your *4-digit PIN* to continue.",
-                phone_number_id,
-              );
+              // await sendWhatsApp(
+              //   from,
+              //   "🔐 Welcome back to VIXA!\n\nPlease enter your *4-digit PIN* to continue.",
+              //   phone_number_id,
+              // );
+              await triggerPinFlow(from, phone_number_id, "LOGIN");
             } else {
               // CASE B: User NOT Registered -> Trigger Onboarding Flow
               console.log(
@@ -3028,13 +3039,30 @@ async function processFlowCompletion(phone, phone_number_id, form) {
   // 1. Map the field values from the form object
 
   console.log(form, "form)form)form)");
+
+  const pin = form.screen_0_pin_0;
+
+  if (pin) {
+    // Decode the context from flow_token (set in triggerPinFlow)
+    // flow_token arrives in form as form.flow_token (WhatsApp includes it)
+    const flowToken = form.flow_token || "";
+    const pinContext = flowToken.includes("::")
+      ? flowToken.split("::")[1]
+      : null;
+
+    console.log("PIN flow submission. Context:", pinContext, "Phone:", phone);
+
+    await handlePinFlowSubmission({ phone, phone_number_id, pin, pinContext });
+    return; // stop — do not fall through to onboarding logic
+  }
+
   const firstName = form.screen_0_First_Name_0 || form.First_Name_4f74a5;
   const lastName = form.screen_0_Last_Name_1 || form.Last_Name_76477c;
   const email = form.screen_0_Email_2;
   const nin = form.screen_0_NIN_3;
   const bvn = form.screen_0_BVN_4;
   const dob = form.screen_0_Date_Of_Birth_5;
-  const pin = form.screen_0_Pin_6;
+  const onboardingPin = form.screen_0_Pin_6;
   const confirmPin = form.screen_0_Confirm_Pin_7;
 
   console.log("Extracted Onboarding Data:", { firstName, lastName, nin });
@@ -3045,12 +3073,14 @@ async function processFlowCompletion(phone, phone_number_id, form) {
     !lastName ||
     !nin ||
     !bvn ||
-    !pin ||
+    !onboardingPin ||
     !confirmPin ||
     pin !== confirmPin
   ) {
     const message =
-      pin !== confirmPin ? "Pins do not match." : "Missing required fields.";
+      onboardingPin !== confirmPin
+        ? "Pins do not match."
+        : "Missing required fields.";
     console.warn("Validation failed:", message);
     await sendWhatsApp(
       phone,
@@ -3070,7 +3100,7 @@ async function processFlowCompletion(phone, phone_number_id, form) {
       phoneNumber: phone,
       phoneNumberId: phone_number_id,
       email,
-      pin,
+      pin: onboardingPin,
     });
 
     if (!createRes.success) {
@@ -3408,11 +3438,12 @@ async function handleAuthenticationGate({ from, phone_number_id, msgText }) {
       },
     });
 
-    await sendWhatsApp(
-      from,
-      "🔐 Please enter your *4-digit PIN* to continue.",
-      phone_number_id,
-    );
+    // await sendWhatsApp(
+    //   from,
+    //   "🔐 Please enter your *4-digit PIN* to continue.",
+    //   phone_number_id,
+    // );
+    await triggerPinFlow(from, phone_number_id, "LOGIN");
 
     return { status: "PIN_REQUESTED" };
   }
@@ -3483,6 +3514,346 @@ async function handleAuthenticationGate({ from, phone_number_id, msgText }) {
     );
 
     return { status: "WRONG_PIN" };
+  }
+}
+
+async function handlePinFlowSubmission({
+  phone,
+  phone_number_id,
+  pin,
+  pinContext,
+}) {
+  const session = await getSession(phone);
+
+  if (!pin || pin.length < 4) {
+    await sendWhatsApp(
+      phone,
+      "⚠️ Invalid PIN. Please try again.",
+      phone_number_id,
+    );
+    return;
+  }
+
+  switch (pinContext) {
+    // ─────────────────────────────────────────────
+    // LOGIN / SESSION RE-AUTH
+    // ─────────────────────────────────────────────
+    case "LOGIN": {
+      try {
+        await loginUser({ phoneNumber: phone, pin });
+        const me = await fetchAuthMe();
+        if (!me) throw new Error("ME_NOT_FOUND");
+
+        await updateSession(phone, {
+          data: {
+            ...session.data,
+            awaitingPin: false,
+            authenticated: true,
+            pinAttempts: 0,
+          },
+        });
+
+        await sendWhatsApp(
+          phone,
+          `Welcome back ${me.firstName} 👋`,
+          phone_number_id,
+        );
+        await sendMainMenu(phone, phone_number_id);
+      } catch (err) {
+        const attempts = (session.data?.pinAttempts || 0) + 1;
+        await updateSession(phone, {
+          data: {
+            ...session.data,
+            pinAttempts: attempts,
+            awaitingPin: true,
+            authenticated: false,
+          },
+        });
+        await sendWhatsApp(
+          phone,
+          "❌ Incorrect PIN. Please try again.",
+          phone_number_id,
+        );
+        await triggerPinFlow(phone, phone_number_id, "LOGIN");
+      }
+      break;
+    }
+
+    // ─────────────────────────────────────────────
+    // DEPOSIT — PIN to confirm deposit amount
+    // ─────────────────────────────────────────────
+    case "DEPOSIT": {
+      const depositResult = await depositCrypto({
+        currency: session.data.depositCurrency,
+        amountNgn: session.data.depositAmount,
+        channelId: "AF944F0C-BA70-47C7-86DC-1BAD5A6AB4E4",
+        coin: session.data.depositCoin,
+        correlationId: `CORR-${Date.now()}`,
+        idempotencyKey: `IDEMPOTENCY-${Date.now()}`,
+        pin,
+      });
+
+      console.log(depositResult, "depositResult from PIN flow");
+
+      if (!depositResult.success) {
+        const rawError = depositResult.error?.message || "Unknown server error";
+        const friendly = await humanizeError(rawError, "confirm deposit");
+        await sendWhatsApp(phone, friendly, phone_number_id);
+        return;
+      }
+
+      const depositData = depositResult.data.data;
+      const expiryDate = new Date(depositData.expiresAtUtc);
+      const formattedExpiry = expiryDate.toLocaleTimeString("en-NG", {
+        hour: "2-digit",
+        minute: "2-digit",
+        hour12: true,
+        timeZone: "Africa/Lagos",
+      });
+      const formattedAmount =
+        depositData.amountToPayNgn?.toLocaleString("en-NG");
+      const accNo = depositData.accountNumber;
+
+      await sendWhatsApp(
+        phone,
+        {
+          type: "interactive",
+          interactive: {
+            type: "button",
+            body: {
+              text: `✅ *Deposit Initiated*\n\nPlease make a transfer using the details below:\n💰 *Amount:* ₦${formattedAmount}\n🏦 *Bank Name:* ${depositData.bankName}\n👤 *Account Name:* ${depositData.accountName}\n🔢 *Account Number:* \`${accNo}\`\n🧾 *Reference:* ${depositData.reference}\n⏳ *Expires At:* ${formattedExpiry}\n\nOnce you've completed the transfer, tap *Confirm Payment* below.`,
+            },
+            action: {
+              buttons: [
+                {
+                  type: "reply",
+                  reply: {
+                    id: "CONFIRM_DEPOSIT_PAYMENT",
+                    title: "Confirm Payment",
+                  },
+                },
+              ],
+            },
+          },
+        },
+        phone_number_id,
+      );
+
+      await updateSession(phone, {
+        data: {
+          ...session.data,
+          pendingDeposit: false,
+          awaitingDepositPin: false,
+          awaitingDepositConfirmation: true,
+          depositReference: depositData.reference,
+          id: session.data.id,
+        },
+      });
+      break;
+    }
+
+    // ─────────────────────────────────────────────
+    // SWAP QUOTE — PIN to get quote
+    // ─────────────────────────────────────────────
+    case "SWAP_QUOTE": {
+      // This context isn't used currently (swap uses PIN at execution, not quote).
+      // Reserved for future use.
+      break;
+    }
+
+    // ─────────────────────────────────────────────
+    // SWAP EXECUTE — PIN to authorize swap
+    // ─────────────────────────────────────────────
+    case "SWAP": {
+      const { fromCoin, amount, toCoin } = session.data.swap;
+
+      const swapResult = await executeSwap({
+        fromCoin,
+        fromAmount: amount,
+        toCoin,
+        pin,
+      });
+
+      if (!swapResult.success) {
+        const rawError = swapResult.error?.message || "Unknown server error";
+        const friendly = await humanizeError(rawError, "execute a crypto swap");
+        await sendWhatsApp(phone, friendly, phone_number_id);
+        await sendMainMenu(phone, phone_number_id);
+        return;
+      }
+
+      await sendWhatsApp(
+        phone,
+        `✅ *Swap Successful!*\n\n${amount} ${fromCoin} → ${swapResult.data.data.toAmount} ${toCoin}\n\n🎉 Your wallet has been updated.`,
+        phone_number_id,
+      );
+      await updateSession(phone, { data: { ...session.data, swap: null } });
+      await sendWhatsApp(
+        phone,
+        "What would you like to do next?",
+        phone_number_id,
+      );
+      await sendMainMenu(phone, phone_number_id);
+      break;
+    }
+
+    // ─────────────────────────────────────────────
+    // SEND CRYPTO — PIN to authorize send
+    // ─────────────────────────────────────────────
+    case "SEND": {
+      const { coin, amount, address, chain, type } = session.data.send;
+
+      const sendRes = await executeSendCrypto({
+        type,
+        coin,
+        chain: chain?.chain,
+        amount,
+        phoneNumber: phone,
+        externalAddress: address,
+        pin,
+      });
+
+      if (!sendRes.success) {
+        const rawError = sendRes.error?.message || "Unknown server error";
+        const friendly = await humanizeError(rawError, "send crypto");
+        await sendWhatsApp(phone, friendly, phone_number_id);
+        return;
+      }
+
+      await sendWhatsApp(
+        phone,
+        `✅ *Transfer Successful!*\n\n${amount} ${coin} sent\nTo: ${address}\n\n🚀 Transaction submitted`,
+        phone_number_id,
+      );
+      await updateSession(phone, { data: { ...session.data, send: null } });
+      await sendWhatsApp(
+        phone,
+        "What would you like to do next?",
+        phone_number_id,
+      );
+      await sendMainMenu(phone, phone_number_id);
+      break;
+    }
+
+    // ─────────────────────────────────────────────
+    // WITHDRAW QUOTE — PIN to generate quote
+    // ─────────────────────────────────────────────
+    case "WITHDRAW_QUOTE": {
+      const { coin, amount, channelId } = session.data.withdraw;
+
+      const quoteRes = await fetchWithdrawalQuote({
+        coin,
+        amount,
+        channelId,
+        pin,
+      });
+
+      if (!quoteRes.success) {
+        const rawError = quoteRes.error?.message || "Unknown server error";
+        const friendly = await humanizeError(
+          rawError,
+          "get a withdrawal quote",
+        );
+        await sendWhatsApp(phone, friendly, phone_number_id);
+        return;
+      }
+
+      const q = quoteRes.data;
+      const msgText = `📊 *Withdrawal Quote*\n\nWithdrawing: ${q.coinAmount} ${q.coin}\nEstimated ${q.fiatCurrency}: ${q.estimatedFiat} ${q.fiatCurrency}\nFees: ${q.totalFees}\n\nDo you want to proceed?`;
+
+      await updateSession(phone, {
+        data: {
+          ...session.data,
+          withdraw: {
+            ...session.data.withdraw,
+            pin,
+            step: "AWAITING_QUOTE_CONFIRM",
+          },
+        },
+      });
+
+      await sendWhatsApp(
+        phone,
+        {
+          type: "interactive",
+          interactive: {
+            type: "button",
+            body: { text: msgText },
+            action: {
+              buttons: [
+                {
+                  type: "reply",
+                  reply: { id: "QUOTE_CONFIRM_YES", title: "Yes, Proceed" },
+                },
+                {
+                  type: "reply",
+                  reply: { id: "WITHDRAW_CANCEL", title: "Cancel" },
+                },
+              ],
+            },
+          },
+        },
+        phone_number_id,
+      );
+      break;
+    }
+
+    // ─────────────────────────────────────────────
+    // WITHDRAW EXECUTE — PIN to finalize withdrawal
+    // ─────────────────────────────────────────────
+    case "WITHDRAW_EXECUTE": {
+      const { coin, amount, accountNumber, accountName, networkId, channelId } =
+        session.data.withdraw;
+
+      const execRes = await executeWithdrawal({
+        coin,
+        amount,
+        accountNumber,
+        accountName,
+        networkId,
+        channelId,
+        pin,
+      });
+
+      if (!execRes.success) {
+        const rawError = execRes.error?.message || "Unknown server error";
+        const friendly = await humanizeError(
+          rawError,
+          "execute a bank withdrawal",
+        );
+        await sendWhatsApp(phone, friendly, phone_number_id);
+        await updateSession(phone, {
+          data: { ...session.data, withdraw: null },
+        });
+        await sendMainMenu(phone, phone_number_id);
+        return;
+      }
+
+      const result = execRes.data;
+      await sendWhatsApp(
+        phone,
+        `✅ *Withdrawal Successful!*\n\nAmount: ${result.amount} ${result.coin}\nTo: ${result.accountName}\nBank: ${result.bankName}\nRef: ${result.reference}\n\n🚀 Funds are on the way!`,
+        phone_number_id,
+      );
+      await updateSession(phone, { data: { ...session.data, withdraw: null } });
+      await sendWhatsApp(
+        phone,
+        "What would you like to do next?",
+        phone_number_id,
+      );
+      await sendMainMenu(phone, phone_number_id);
+      break;
+    }
+
+    default: {
+      console.warn("Unknown pinContext:", pinContext);
+      await sendWhatsApp(
+        phone,
+        "⚠️ Something went wrong with PIN context. Please start over.",
+        phone_number_id,
+      );
+      await sendMainMenu(phone, phone_number_id);
+    }
   }
 }
 
@@ -3576,103 +3947,6 @@ async function sendPaginatedBanksMenu(
     phone_number_id,
   );
 }
-
-// async function handleAuthenticationGate({ from, phone_number_id, msgText }) {
-//   const session = await getSession(from);
-
-//   // Already authenticated → continue normally
-//   // if (session?.data?.authenticated) {
-//   //   return { status: "AUTHENTICATED" };
-//   // }
-
-//   // Ask for PIN
-//   if (!session?.data?.awaitingPin) {
-//     await updateSession(from, {
-//       data: {
-//         ...(session.data || {}),
-//         awaitingPin: true,
-//         pinAttempts: 0,
-//       },
-//     });
-
-//     await sendWhatsApp(
-//       from,
-//       "🔐 Please enter your *4-digit PIN* to continue.",
-//       phone_number_id,
-//     );
-
-//     return { status: "PIN_REQUESTED" };
-//   }
-
-//   // User is replying with PIN
-//   const pin = msgText?.trim();
-
-//   if (!pin || pin.length < 4) {
-//     await sendWhatsApp(from, "⚠️ Please enter a valid PIN.", phone_number_id);
-//     return { status: "INVALID_PIN" };
-//   }
-
-//   try {
-//     // Attempt login
-//     await loginUser({ phoneNumber: from, pin });
-
-//     // Try fetching profile
-//     const me = await fetchAuthMe();
-
-//     if (!me) {
-//       throw new Error("ME_NOT_FOUND");
-//     }
-
-//     // Success 🎉
-//     await updateSession(from, {
-//       data: {
-//         ...(session.data || {}),
-//         awaitingPin: false,
-//         authenticated: true,
-//         pinAttempts: 0,
-//       },
-//     });
-
-//     return { status: "SUCCESS", me };
-//   } catch (err) {
-//     const message = err?.message?.toLowerCase() || "";
-
-//     // User not found → onboarding
-//     if (
-//       message.includes("not found") ||
-//       message.includes("user") ||
-//       message === "me_not_found"
-//     ) {
-//       await updateSession(from, {
-//         data: {
-//           ...(session.data || {}),
-//           awaitingPin: false,
-//           authenticated: false,
-//         },
-//       });
-
-//       return { status: "ONBOARDING_REQUIRED" };
-//     }
-
-//     // Wrong PIN
-//     const attempts = (session.data?.pinAttempts || 0) + 1;
-
-//     await updateSession(from, {
-//       data: {
-//         ...(session.data || {}),
-//         pinAttempts: attempts,
-//       },
-//     });
-
-//     await sendWhatsApp(
-//       from,
-//       "❌ Incorrect PIN. Please try again.",
-//       phone_number_id,
-//     );
-
-//     return { status: "WRONG_PIN" };
-//   }
-// }
 
 // 🆕 HELPER: Send Paginated Countries List
 async function sendPaginatedCountriesMenu(
@@ -3855,6 +4129,56 @@ async function triggerFlow(toPhone, phone_number_id) {
   }
 
   console.log("triggerFlow sent to", toPhone);
+}
+
+async function triggerPinFlow(toPhone, phone_number_id, pinContext) {
+  // pinContext is a string like "DEPOSIT", "SWAP", "WITHDRAW", "EXECUTE_WITHDRAW", "SWAP_QUOTE", "SEND"
+  // We store it in session BEFORE calling this, so the nfm_reply handler knows what pin was for.
+
+  if (!WHATSAPP_TOKEN || !phone_number_id) {
+    console.log("[MOCK PIN FLOW] to:", toPhone, "context:", pinContext);
+    return;
+  }
+
+  const url = `https://graph.facebook.com/${WHATSAPP_API_VERSION}/${phone_number_id}/messages`;
+
+  const body = {
+    messaging_product: "whatsapp",
+    to: toPhone,
+    type: "interactive",
+    interactive: {
+      type: "flow",
+      body: {
+        text: "🔐 Please enter your PIN to continue.",
+      },
+      action: {
+        name: "flow",
+        parameters: {
+          flow_id: PIN_FLOW_ID,
+          flow_token: `${toPhone}::${pinContext}`, // encode context in token
+          flow_cta: "Enter PIN",
+          flow_message_version: "3",
+        },
+      },
+    },
+  };
+
+  const res = await fetch(url, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${WHATSAPP_TOKEN}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(body),
+  });
+
+  if (!res.ok) {
+    const debug = await res.text();
+    console.error("triggerPinFlow failed:", res.status, debug);
+    throw new Error("triggerPinFlow failed");
+  }
+
+  console.log("triggerPinFlow sent to", toPhone, "context:", pinContext);
 }
 
 /* ------------- WA send helper (text + interactive) ------------- */
