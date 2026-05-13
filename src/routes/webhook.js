@@ -3,7 +3,11 @@ import { getSession, updateSession } from "../services/session.service.js";
 import { createUserOnboarding } from "../services/onboarding.service.js";
 import { verifyNIN } from "../services/kyc.service.js";
 import { verifyBVN } from "../services/bvn.service.js";
-import { loginUser, checkPhoneNumber } from "../services/auth.service.js";
+import {
+  loginUser,
+  checkPhoneNumber,
+  restoreCachedToken,
+} from "../services/auth.service.js";
 import { fetchAuthMe } from "../services/user.service.js";
 import { depositCrypto } from "../services/deposit.service.js";
 import { fetchWalletBalances } from "../services/wallet.service.js";
@@ -162,7 +166,13 @@ router.post("/callback", async (req, res) => {
             data: { ...(session.data || {}), phone_number_id },
           });
 
+          restoreCachedToken(session.data);
+
+          const isFlowReply =
+            msg.type === "interactive" && msg.interactive?.type === "nfm_reply";
+
           if (
+            !isFlowReply &&
             session.data?.authenticated &&
             !isSessionTokenValid(session.data)
           ) {
@@ -2063,102 +2073,101 @@ router.post("/callback", async (req, res) => {
               return;
             }
 
-//             if (session.data?.awaitingDepositPin) {
-//               const pin = msg.text?.body?.trim();
+            //             if (session.data?.awaitingDepositPin) {
+            //               const pin = msg.text?.body?.trim();
 
-//               if (!pin || pin.length !== 4) {
-//                 await sendWhatsApp(
-//                   from,
-//                   "⚠️ Please enter a valid 4-digit PIN.",
-//                   phone_number_id,
-//                 );
-//                 return;
-//               }
-//               // Call depositCrypto
-//               const depositCypto = await depositCrypto({
-//                 currency: session.data.depositCurrency,
-//                 amountNgn: session.data.depositAmount,
-//                 channelId: "AF944F0C-BA70-47C7-86DC-1BAD5A6AB4E4",
-//                 coin: session.data.depositCoin,
-//                 // chain: session.data.depositChain,
-//                 correlationId: `CORR-${Date.now()}`,
-//                 idempotencyKey: `IDEMPOTENCY-${Date.now()}`,
-//                 pin,
-//               });
+            //               if (!pin || pin.length !== 4) {
+            //                 await sendWhatsApp(
+            //                   from,
+            //                   "⚠️ Please enter a valid 4-digit PIN.",
+            //                   phone_number_id,
+            //                 );
+            //                 return;
+            //               }
+            //               // Call depositCrypto
+            //               const depositCypto = await depositCrypto({
+            //                 currency: session.data.depositCurrency,
+            //                 amountNgn: session.data.depositAmount,
+            //                 channelId: "AF944F0C-BA70-47C7-86DC-1BAD5A6AB4E4",
+            //                 coin: session.data.depositCoin,
+            //                 // chain: session.data.depositChain,
+            //                 correlationId: `CORR-${Date.now()}`,
+            //                 idempotencyKey: `IDEMPOTENCY-${Date.now()}`,
+            //                 pin,
+            //               });
 
-//               console.log(depositCypto, "depositCryptodepositCrypto");
+            //               console.log(depositCypto, "depositCryptodepositCrypto");
 
-//               if (depositCypto.success) {
-//                 const depositData = depositCypto.data.data;
+            //               if (depositCypto.success) {
+            //                 const depositData = depositCypto.data.data;
 
-//                 // 1. Format Expiry Time (e.g., "12:14 PM")
-//                 const expiryDate = new Date(depositData.expiresAtUtc);
-//                 const formattedExpiry = expiryDate.toLocaleTimeString("en-NG", {
-//                   hour: "2-digit",
-//                   minute: "2-digit",
-//                   hour12: true,
-//                   timeZone: "Africa/Lagos",
-//                 });
+            //                 // 1. Format Expiry Time (e.g., "12:14 PM")
+            //                 const expiryDate = new Date(depositData.expiresAtUtc);
+            //                 const formattedExpiry = expiryDate.toLocaleTimeString("en-NG", {
+            //                   hour: "2-digit",
+            //                   minute: "2-digit",
+            //                   hour12: true,
+            //                   timeZone: "Africa/Lagos",
+            //                 });
 
-//                 // 2. Format Amount with commas (e.g., "14,000")
-//                 const formattedAmount =
-//                   depositData.amountToPayNgn?.toLocaleString("en-NG");
+            //                 // 2. Format Amount with commas (e.g., "14,000")
+            //                 const formattedAmount =
+            //                   depositData.amountToPayNgn?.toLocaleString("en-NG");
 
-//                 const accNo = depositData.accountNumber;
-//                 // const bank = depositData.bankName;
+            //                 const accNo = depositData.accountNumber;
+            //                 // const bank = depositData.bankName;
 
-//                 await sendWhatsApp(
-//                   from,
-//                   {
-//                     type: "interactive",
-//                     interactive: {
-//                       type: "button",
-//                       body: {
-//                         text: `✅ *Deposit Initiated*
+            //                 await sendWhatsApp(
+            //                   from,
+            //                   {
+            //                     type: "interactive",
+            //                     interactive: {
+            //                       type: "button",
+            //                       body: {
+            //                         text: `✅ *Deposit Initiated*
 
-// Please make a transfer using the details below:
-// 💰 *Amount:* ₦${formattedAmount}
-// 🏦 *Bank Name:* ${depositCypto?.data?.data?.bankName}  
-// 👤 *Account Name:* ${depositCypto?.data?.data?.accountName}  
-// 🔢 *Account Number:* \`${accNo}\`
-// 🧾 *Reference:* ${depositCypto?.data?.data?.reference}
-// ⏳ *Expires At:* ${formattedExpiry}
+            // Please make a transfer using the details below:
+            // 💰 *Amount:* ₦${formattedAmount}
+            // 🏦 *Bank Name:* ${depositCypto?.data?.data?.bankName}
+            // 👤 *Account Name:* ${depositCypto?.data?.data?.accountName}
+            // 🔢 *Account Number:* \`${accNo}\`
+            // 🧾 *Reference:* ${depositCypto?.data?.data?.reference}
+            // ⏳ *Expires At:* ${formattedExpiry}
 
-// Once you’ve completed the transfer, tap *Confirm Payment* below.`,
-//                       },
-//                       action: {
-//                         buttons: [
-//                           {
-//                             type: "reply",
-//                             reply: {
-//                               id: "CONFIRM_DEPOSIT_PAYMENT",
-//                               title: "Confirm Payment",
-//                             },
-//                           },
-//                         ],
-//                       },
-//                     },
-//                   },
-//                   phone_number_id,
-//                 );
+            // Once you’ve completed the transfer, tap *Confirm Payment* below.`,
+            //                       },
+            //                       action: {
+            //                         buttons: [
+            //                           {
+            //                             type: "reply",
+            //                             reply: {
+            //                               id: "CONFIRM_DEPOSIT_PAYMENT",
+            //                               title: "Confirm Payment",
+            //                             },
+            //                           },
+            //                         ],
+            //                       },
+            //                     },
+            //                   },
+            //                   phone_number_id,
+            //                 );
 
-//                 await updateSession(from, {
-//                   data: {
-//                     ...session.data,
-//                     pendingDeposit: false,
-//                     awaitingDepositConfirmation: true,
-//                     awaitingDepositPin: false,
-//                     depositReference: depositCypto?.data?.data?.reference,
-//                     depositAmount: session.data.depositAmount,
-//                     depositCoin: session.data.depositCoin,
-//                     id: session.data.id,
-//                   },
-//                 });
-//               }
+            //                 await updateSession(from, {
+            //                   data: {
+            //                     ...session.data,
+            //                     pendingDeposit: false,
+            //                     awaitingDepositConfirmation: true,
+            //                     awaitingDepositPin: false,
+            //                     depositReference: depositCypto?.data?.data?.reference,
+            //                     depositAmount: session.data.depositAmount,
+            //                     depositCoin: session.data.depositCoin,
+            //                     id: session.data.id,
+            //                   },
+            //                 });
+            //               }
 
-//               return; // Stop further processing
-//             }
-
+            //               return; // Stop further processing
+            //             }
 
             //             if (session.data?.awaitingDepositConfirmation) {
             //               const confirmDeposit = await confirmPayment({

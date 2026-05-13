@@ -53,8 +53,16 @@ export async function loginUser({ phoneNumber, pin, deviceId = "" }) {
 
 export function isSessionTokenValid(sessionData) {
   if (!sessionData?.token) return false;
-  if (!sessionData?.tokenExpiresAt) return false;
+  if (!sessionData?.tokenExpiresAt) return true;
   return Date.now() < sessionData.tokenExpiresAt;
+}
+
+export function restoreCachedToken(sessionData) {
+  if (sessionData?.token && !cachedToken) {
+    cachedToken = sessionData.token;
+    tokenExpiresAt = sessionData.tokenExpiresAt || (Date.now() + 3600 * 1000);
+    console.log("Restored cachedToken from session");
+  }
 }
 
 export async function verifyUserToken() {
