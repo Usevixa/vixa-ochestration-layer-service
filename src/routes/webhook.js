@@ -1387,6 +1387,7 @@ router.post("/callback", async (req, res) => {
 
               // 1. Fetch channels dynamically for NG
               const channelsRes = await fetchPaymentChannels("NG", "withdraw");
+              console.log(channelsRes)
               if (!channelsRes.success || !channelsRes.data?.items?.length) {
                 await sendWhatsApp(
                   from,
@@ -3620,7 +3621,7 @@ async function handlePinFlowSubmission({
       );
       const depositResult = await depositCrypto({
         currency: session.data.depositCurrency,
-        amountNgn: session.data.depositAmount,
+        amountLocal: session.data.depositAmount,
         channelId: "AF944F0C-BA70-47C7-86DC-1BAD5A6AB4E4",
         coin: session.data.depositCoin,
         correlationId: `CORR-${Date.now()}`,
@@ -3646,7 +3647,7 @@ async function handlePinFlowSubmission({
         timeZone: "Africa/Lagos",
       });
       const formattedAmount =
-        depositData.amountToPayNgn?.toLocaleString("en-NG");
+        depositData.amountToPayLocal?.toLocaleString("en-NG");
       const accNo = depositData.accountNumber;
 
       await sendWhatsApp(
