@@ -172,8 +172,14 @@ router.post("/callback", async (req, res) => {
           const isFlowReply =
             msg.type === "interactive" && msg.interactive?.type === "nfm_reply";
 
+          const isInteractiveReply =
+            msg.type === "interactive" &&
+            (msg.interactive?.type === "button_reply" ||
+              msg.interactive?.type === "list_reply");
+
           if (
             !isFlowReply &&
+            !isInteractiveReply &&
             session.data?.authenticated &&
             !isSessionTokenValid(session.data)
           ) {
@@ -185,7 +191,7 @@ router.post("/callback", async (req, res) => {
               // to prevent them from executing a stale transaction after re-logging in.
               await updateSession(from, {
                 data: {
-                  // ...session.data,
+                  ...session.data,
                   authenticated: false,
                   awaitingPin: true,
                   pinAttempts: 0,
@@ -3127,7 +3133,7 @@ async function processFlowCompletion(phone, phone_number_id, form) {
     try {
       console.log("here here", phone, pin);
 
-      loginToken = await loginUser({ phoneNumber: phone, pin });
+      loginToken = await loginUser({ phoneNumber: phone, pin: onboardingPin });
       console.log(loginToken, "loginTokenloginToken");
     } catch (e) {
       console.log(
@@ -3440,11 +3446,20 @@ async function handleAuthenticationGate({ from, phone_number_id, msgText }) {
 
   // Ask for PIN if not already asked
   if (!session?.data?.awaitingPin) {
+    // await updateSession(from, {
+    //   data: {
+    //     awaitingPin: true,
+    //     pinAttempts: 0,
+    //     authenticated: false, // Strictly enforce logged out state
+    //   },
+    // });
+    const freshSession = await getSession(from);
     await updateSession(from, {
       data: {
-        awaitingPin: true,
+        ...freshSession.data,
+        awaitingPin: false,
+        authenticated: true,
         pinAttempts: 0,
-        authenticated: false, // Strictly enforce logged out state
       },
     });
 
