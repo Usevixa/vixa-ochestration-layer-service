@@ -40,7 +40,7 @@ export async function loginUser({ phoneNumber, pin, deviceId = "" }) {
       data: {
         token,
         pin,
-        tokenExpiresAt, 
+        tokenExpiresAt,
       },
     });
 
@@ -53,13 +53,15 @@ export async function loginUser({ phoneNumber, pin, deviceId = "" }) {
 
 export function isSessionTokenValid(sessionData) {
   if (!sessionData?.token) return false;
-  if (!sessionData?.tokenExpiresAt) return true;
-  const GRACE_MS = 30_000; // 30-second buffer
-  return Date.now() < (sessionData.tokenExpiresAt - GRACE_MS);
+  if (!sessionData?.tokenExpiresAt) return true; // no expiry stored = assume valid
+  // Only flag as expired if it's been expired for more than 60 seconds
+  // This prevents false positives from clock skew or server restarts
+  const GRACE_MS = 60_000;
+  return Date.now() < (sessionData.tokenExpiresAt + GRACE_MS);
 }
 
 export function restoreCachedToken(sessionData) {
-  if (sessionData?.token && !cachedToken) {
+  if (sessionData?.token) {
     cachedToken = sessionData.token;
     tokenExpiresAt = sessionData.tokenExpiresAt || Date.now() + 3600 * 1000;
     console.log(
