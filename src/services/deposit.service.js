@@ -10,7 +10,7 @@ const httpsAgent = new https.Agent({
 
 export async function depositCrypto({
   currency,
-  amountNgn,
+  amountLocal,
   channelId,
   coin,
   // chain,
@@ -21,7 +21,7 @@ export async function depositCrypto({
   try {
     const payload = {
       currency,
-      amountNgn,
+      amountLocal,
       channelId,
       coin,
       // chain,
