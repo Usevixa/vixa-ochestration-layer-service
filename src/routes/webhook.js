@@ -3095,7 +3095,7 @@ async function processFlowCompletion(phone, phone_number_id, form) {
 
   console.log("Extracted Onboarding Data:", { firstName, lastName, nin });
 
-  // Basic validation
+  
   if (
     !firstName ||
     !lastName ||
