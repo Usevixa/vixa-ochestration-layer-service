@@ -1387,7 +1387,7 @@ router.post("/callback", async (req, res) => {
 
               // 1. Fetch channels dynamically for NG
               const channelsRes = await fetchPaymentChannels("NG", "withdraw");
-              console.log(channelsRes)
+              console.log(channelsRes);
               if (!channelsRes.success || !channelsRes.data?.items?.length) {
                 await sendWhatsApp(
                   from,
@@ -1740,16 +1740,23 @@ router.post("/callback", async (req, res) => {
             //   return;
             // }
 
-            const isInWithdrawFlow = [
-              "ENTER_AMOUNT",
-              "ENTER_QUOTE_PIN",
-              "ENTER_ACCOUNT_NUMBER_OTHER",
-              "ENTER_ACCOUNT_NAME",
-              "ENTER_ACCOUNT_NUMBER",
-              "ENTER_EXECUTE_PIN",
-            ].includes(session.data?.withdraw?.step);
+            const isInActiveFlow =
+              session.data?.pendingDeposit === true ||
+              session.data?.awaitingDepositPin === true ||
+              [
+                "ENTER_AMOUNT",
+                "ENTER_QUOTE_PIN",
+                "ENTER_ACCOUNT_NUMBER_OTHER",
+                "ENTER_ACCOUNT_NAME",
+                "ENTER_ACCOUNT_NUMBER",
+                "ENTER_EXECUTE_PIN",
+              ].includes(session.data?.withdraw?.step) ||
+              ["ENTER_AMOUNT", "ENTER_ADDRESS", "ENTER_TAG"].includes(
+                session.data?.send?.step,
+              ) ||
+              ["ENTER_AMOUNT"].includes(session.data?.swap?.step);
 
-            if (!isInWithdrawFlow) {
+            if (!isInActiveFlow) {
               const aiAnalysis = await analyzeUserIntent(rawText, session.data);
               console.log(
                 "AI Intent:",
@@ -2970,7 +2977,11 @@ router.post("/callback", async (req, res) => {
             //   return;
             // }
 
-            if (session.data?.authenticated) {
+            // if (session.data?.authenticated) {
+            //   await sendMainMenu(from, phone_number_id);
+            //   return;
+            // }
+            if (session.data?.authenticated && !isInActiveFlow) {
               await sendMainMenu(from, phone_number_id);
               return;
             }
@@ -3092,7 +3103,7 @@ async function processFlowCompletion(phone, phone_number_id, form) {
     !bvn ||
     !onboardingPin ||
     !confirmPin ||
-    pin !== confirmPin
+    onboardingPin !== confirmPin
   ) {
     const message =
       onboardingPin !== confirmPin

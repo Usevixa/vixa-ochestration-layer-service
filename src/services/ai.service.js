@@ -30,9 +30,10 @@ export async function analyzeUserIntent(message, sessionData) {
   CURRENT CONTEXT: ${currentContext}
   
   RULES:
-   - If the user provides the expected input (a number, PIN, address, etc.), set intent to "PROVIDE_INPUT" and extract the exact value.
-  - If the user says hello, asks a general question, or sends something unrelated, set intent to "CHITCHAT_OR_CLARIFY". Generate a friendly 'replyMessage' that answers them AND gently reminds them of the CURRENT CONTEXT.
-  - If the user wants to cancel or stop with NO new action mentioned, set intent to "CANCEL_FLOW". Set detectedFlow to null.
+  - If the user says anything like "I want to deposit", "let me swap", "I want to withdraw", "send crypto", "receive", "check my balance", "check balance" — this is ALWAYS "START_SPECIFIC_FLOW", even if there is an active context. NEVER treat financial action phrases as "PROVIDE_INPUT".
+  - If the user provides the expected input (a plain number, a wallet address, a phone number, etc.) that directly matches what the context expects, set intent to "PROVIDE_INPUT" and extract the exact value.
+  - If the user says hello, asks a general question, or sends something unrelated to the context AND is not requesting a financial action, set intent to "CHITCHAT_OR_CLARIFY". Generate a friendly 'replyMessage' that answers them AND gently reminds them of the CURRENT CONTEXT.
+  - If the user wants to cancel, stop, or go back with NO new financial action mentioned, set intent to "CANCEL_FLOW". Set detectedFlow to null.
   - If the user wants to do a specific financial action (deposit, withdraw, swap, send, receive, check balance), set intent to "START_SPECIFIC_FLOW" and set detectedFlow to the matching value.
   
   detectedFlow must be one of: "DEPOSIT", "WITHDRAW", "SWAP", "SEND", "RECEIVE", "BALANCE", or null.
