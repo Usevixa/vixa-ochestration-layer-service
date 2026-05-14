@@ -3610,6 +3610,14 @@ async function handlePinFlowSubmission({
     // DEPOSIT — PIN to confirm deposit amount
     // ─────────────────────────────────────────────
     case "DEPOSIT": {
+      console.log(
+        session.data.depositCurrency,
+        session.data.depositAmount,
+        "AF944F0C-BA70-47C7-86DC-1BAD5A6AB4E4",
+        session.data.depositCoin,
+        "CORR-${Date.now()",
+        "IDEMPOTENCY-${Date.now()",
+      );
       const depositResult = await depositCrypto({
         currency: session.data.depositCurrency,
         amountNgn: session.data.depositAmount,
