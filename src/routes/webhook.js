@@ -161,12 +161,13 @@ router.post("/callback", async (req, res) => {
           if (!from) continue;
 
           // Store phone_number_id in session for later replies
-          const session = await getSession(from);
+          let session = await getSession(from);
           await updateSession(from, {
             data: { ...(session.data || {}), phone_number_id },
           });
 
           restoreCachedToken(session.data);
+          session = await getSession(from);
 
           const isFlowReply =
             msg.type === "interactive" && msg.interactive?.type === "nfm_reply";
@@ -3553,9 +3554,11 @@ async function handlePinFlowSubmission({
         const me = await fetchAuthMe();
         if (!me) throw new Error("ME_NOT_FOUND");
 
+        // Re-read session so we get the tokenExpiresAt that loginUser() just wrote
+        const freshSession = await getSession(phone);
         await updateSession(phone, {
           data: {
-            ...session.data,
+            ...freshSession.data,
             awaitingPin: false,
             authenticated: true,
             pinAttempts: 0,

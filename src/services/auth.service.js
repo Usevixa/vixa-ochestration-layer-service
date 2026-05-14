@@ -39,11 +39,11 @@ export async function loginUser({ phoneNumber, pin, deviceId = "" }) {
     await updateSession(phoneNumber, {
       data: {
         token,
-        pin, 
-        tokenExpiresAt: Date.now() + (expiresIn - 300) * 1000,
+        pin,
+        tokenExpiresAt, 
       },
     });
-    
+
     return token;
   } catch (err) {
     console.error("loginUser ERROR:", err?.response?.data || err.message);
@@ -54,14 +54,18 @@ export async function loginUser({ phoneNumber, pin, deviceId = "" }) {
 export function isSessionTokenValid(sessionData) {
   if (!sessionData?.token) return false;
   if (!sessionData?.tokenExpiresAt) return true;
-  return Date.now() < sessionData.tokenExpiresAt;
+  const GRACE_MS = 30_000; // 30-second buffer
+  return Date.now() < (sessionData.tokenExpiresAt - GRACE_MS);
 }
 
 export function restoreCachedToken(sessionData) {
   if (sessionData?.token && !cachedToken) {
     cachedToken = sessionData.token;
-    tokenExpiresAt = sessionData.tokenExpiresAt || (Date.now() + 3600 * 1000);
-    console.log("Restored cachedToken from session");
+    tokenExpiresAt = sessionData.tokenExpiresAt || Date.now() + 3600 * 1000;
+    console.log(
+      "Restored cachedToken from session, expires:",
+      new Date(tokenExpiresAt).toISOString(),
+    );
   }
 }
 
