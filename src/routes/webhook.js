@@ -34,6 +34,10 @@ import {
 } from "../services/send.service.js";
 
 import { fetchRates } from "../services/rates.service.js";
+import {
+  requestChangePinOtp,
+  changePinRequest,
+} from "../services/changePin.service.js";
 // IMPORTANT: Ensure this file has the correct two-stage encryption/decryption functions
 import { decryptRequest, encryptResponse } from "../utils/decrypt.js";
 
@@ -973,6 +977,27 @@ router.post("/callback", async (req, res) => {
               return;
             }
 
+            if (actionId === "LOCK_UNLOCK_WALLET") {
+              await sendWhatsApp(
+                from,
+                "🔒 Lock/Unlock Wallet is coming soon. Stay tuned!",
+                phone_number_id,
+              );
+              await sendMainMenu(from, phone_number_id);
+              return;
+            }
+
+            if (actionId === "CHANGE_PIN") {
+              await updateSession(from, {
+                data: {
+                  ...session.data,
+                  changePin: { step: "ENTER_CURRENT_PIN" },
+                },
+              });
+              await triggerPinFlow(from, phone_number_id, "CHANGE_PIN_CURRENT");
+              return;
+            }
+
             if (actionId.startsWith("WITHDRAW_BANK_")) {
               const networkId = actionId.replace("WITHDRAW_BANK_", "");
               // Retrieve bank name from session cache
@@ -1374,6 +1399,42 @@ router.post("/callback", async (req, res) => {
                 await sendMainMenu(from, phone_number_id);
                 break;
               }
+              case "SETTINGS": {
+                await sendWhatsApp(
+                  from,
+                  {
+                    type: "interactive",
+                    interactive: {
+                      type: "list",
+                      body: {
+                        text: "⚙️ *Settings*\n\nWhat would you like to do?",
+                      },
+                      action: {
+                        button: "Select Option",
+                        sections: [
+                          {
+                            title: "Account Settings",
+                            rows: [
+                              {
+                                id: "CHANGE_PIN",
+                                title: "Change PIN",
+                                description: "Update your 4-digit PIN",
+                              },
+                              {
+                                id: "LOCK_UNLOCK_WALLET",
+                                title: "Lock / Unlock Wallet",
+                                description: "Control wallet access",
+                              },
+                            ],
+                          },
+                        ],
+                      },
+                    },
+                  },
+                  phone_number_id,
+                );
+                break;
+              }
             }
 
             continue;
@@ -1763,7 +1824,8 @@ router.post("/callback", async (req, res) => {
               ["ENTER_AMOUNT", "ENTER_ADDRESS", "ENTER_TAG"].includes(
                 session.data?.send?.step,
               ) ||
-              ["ENTER_AMOUNT"].includes(session.data?.swap?.step);
+              ["ENTER_AMOUNT"].includes(session.data?.swap?.step) ||
+              session.data?.changePin?.step === "ENTER_OTP";
 
             if (!isInActiveFlow) {
               const aiAnalysis = await analyzeUserIntent(rawText, session.data);
@@ -2579,6 +2641,54 @@ router.post("/callback", async (req, res) => {
             //   return;
             // }
 
+            if (session.data?.changePin?.step === "ENTER_OTP") {
+              const otpCode = rawText;
+
+              if (!otpCode || otpCode.length < 4) {
+                await sendWhatsApp(
+                  from,
+                  "⚠️ Please enter a valid OTP.",
+                  phone_number_id,
+                );
+                return;
+              }
+
+              const { currentPin, newPin, confirmPin } = session.data.changePin;
+
+              const changeRes = await changePinRequest({
+                currentPin,
+                newPin,
+                confirmPin,
+                otpCode,
+              });
+
+              if (!changeRes.success) {
+                const friendly = await humanizeError(
+                  changeRes.error?.message || "Unknown error",
+                  "change your PIN",
+                );
+                await sendWhatsApp(from, friendly, phone_number_id);
+                await updateSession(from, {
+                  data: { ...session.data, changePin: null },
+                });
+                await sendMainMenu(from, phone_number_id);
+                return;
+              }
+
+              await sendWhatsApp(
+                from,
+                "✅ *PIN Changed Successfully!*\n\nYour PIN has been updated. Please use your new PIN next time you log in.",
+                phone_number_id,
+              );
+
+              await updateSession(from, {
+                data: { ...session.data, changePin: null },
+              });
+
+              await sendMainMenu(from, phone_number_id);
+              return;
+            }
+
             // --- WITHDRAW FLOW LOGIC ---
             if (session.data?.withdraw?.step === "ENTER_AMOUNT") {
               const amount = parseFloat(msg.text?.body?.trim());
@@ -3300,6 +3410,11 @@ Let’s get you started 🚀`,
                       title: "Contact Support",
                       description: "Get help from VIXA team",
                     },
+                    {
+                      id: "SETTINGS",
+                      title: "Settings",
+                      description: "Manage your account",
+                    },
                   ],
                 },
               ],
@@ -3914,6 +4029,88 @@ async function handlePinFlowSubmission({
       break;
     }
 
+    case "CHANGE_PIN_CURRENT": {
+      await updateSession(phone, {
+        data: {
+          ...session.data,
+          changePin: {
+            ...session.data.changePin,
+            currentPin: pin,
+            step: "ENTER_NEW_PIN",
+          },
+        },
+      });
+      await triggerPinFlow(phone, phone_number_id, "CHANGE_PIN_NEW");
+      break;
+    }
+
+    case "CHANGE_PIN_NEW": {
+      await updateSession(phone, {
+        data: {
+          ...session.data,
+          changePin: {
+            ...session.data.changePin,
+            newPin: pin,
+            step: "ENTER_CONFIRM_PIN",
+          },
+        },
+      });
+      await triggerPinFlow(phone, phone_number_id, "CHANGE_PIN_CONFIRM");
+      break;
+    }
+
+    case "CHANGE_PIN_CONFIRM": {
+      const { currentPin, newPin } = session.data.changePin;
+
+      if (pin !== newPin) {
+        await sendWhatsApp(
+          phone,
+          "❌ PINs do not match. Please start over.",
+          phone_number_id,
+        );
+        await updateSession(phone, {
+          data: { ...session.data, changePin: null },
+        });
+        await sendMainMenu(phone, phone_number_id);
+        return;
+      }
+
+      // Request OTP — backend sends it to user's WhatsApp
+      const otpRes = await requestChangePinOtp();
+
+      if (!otpRes.success) {
+        const friendly = await humanizeError(
+          otpRes.error?.message || "Unknown error",
+          "request a PIN change OTP",
+        );
+        await sendWhatsApp(phone, friendly, phone_number_id);
+        await updateSession(phone, {
+          data: { ...session.data, changePin: null },
+        });
+        await sendMainMenu(phone, phone_number_id);
+        return;
+      }
+
+      // Save confirmPin and move to OTP step
+      await updateSession(phone, {
+        data: {
+          ...session.data,
+          changePin: {
+            ...session.data.changePin,
+            confirmPin: pin,
+            step: "ENTER_OTP",
+          },
+        },
+      });
+
+      await sendWhatsApp(
+        phone,
+        "✅ An OTP has been sent to your WhatsApp number.\n\nPlease type it here to complete your PIN change:",
+        phone_number_id,
+      );
+      break;
+    }
+
     default: {
       console.warn("Unknown pinContext:", pinContext);
       await sendWhatsApp(
@@ -4141,6 +4338,11 @@ async function sendMainMenu(to, phone_number_id) {
                   id: "CONTACT_SUPPORT",
                   title: "Contact Support",
                   description: "Get help from VIXA team",
+                },
+                {
+                  id: "SETTINGS",
+                  title: "Settings",
+                  description: "Manage your account",
                 },
               ],
             },
