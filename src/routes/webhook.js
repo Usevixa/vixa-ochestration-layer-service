@@ -994,7 +994,12 @@ router.post("/callback", async (req, res) => {
                   changePin: { step: "ENTER_CURRENT_PIN" },
                 },
               });
-              await triggerPinFlow(from, phone_number_id, "CHANGE_PIN_CURRENT");
+              await triggerPinFlow(
+                from,
+                phone_number_id,
+                "CHANGE_PIN_CURRENT",
+                "🔐 Enter your *current PIN* to begin the change:",
+              );
               return;
             }
 
@@ -2644,6 +2649,24 @@ router.post("/callback", async (req, res) => {
             if (session.data?.changePin?.step === "ENTER_OTP") {
               const otpCode = rawText;
 
+              if (otpCode?.toLowerCase() === "resend") {
+                const otpRes = await requestChangePinOtp();
+                if (!otpRes.success) {
+                  const friendly = await humanizeError(
+                    otpRes.error?.message || "Unknown error",
+                    "resend OTP",
+                  );
+                  await sendWhatsApp(from, friendly, phone_number_id);
+                } else {
+                  await sendWhatsApp(
+                    from,
+                    "✅ A new OTP has been sent to your WhatsApp number.\n\nPlease type it here:",
+                    phone_number_id,
+                  );
+                }
+                return;
+              }
+
               if (!otpCode || otpCode.length < 4) {
                 await sendWhatsApp(
                   from,
@@ -2663,8 +2686,49 @@ router.post("/callback", async (req, res) => {
               });
 
               if (!changeRes.success) {
+                const errorMsg = changeRes.error?.message || "";
+                const errorLower = errorMsg.toLowerCase();
+
+                // Wrong OTP — let them try again without restarting
+                if (
+                  errorLower.includes("otp") ||
+                  errorLower.includes("invalid code") ||
+                  errorLower.includes("expired")
+                ) {
+                  await sendWhatsApp(
+                    from,
+                    "❌ The OTP you entered is invalid or has expired.\n\nPlease enter the OTP again, or type *resend* to request a new one.",
+                    phone_number_id,
+                  );
+                  return; // Stay in ENTER_OTP step — don't clear changePin
+                }
+
+                // Wrong current PIN — restart from current PIN
+                if (
+                  errorLower.includes("incorrect") ||
+                  errorLower.includes("current pin") ||
+                  errorLower.includes("wrong pin")
+                ) {
+                  await sendWhatsApp(
+                    from,
+                    "❌ Your current PIN is incorrect. Let's start over.",
+                    phone_number_id,
+                  );
+                  await updateSession(from, {
+                    data: { ...session.data, changePin: null },
+                  });
+                  await triggerPinFlow(
+                    from,
+                    phone_number_id,
+                    "CHANGE_PIN_CURRENT",
+                    "🔐 Enter your *current PIN* to begin the change:",
+                  );
+                  return;
+                }
+
+                // Generic error — show friendly message and go back to menu
                 const friendly = await humanizeError(
-                  changeRes.error?.message || "Unknown error",
+                  errorMsg,
                   "change your PIN",
                 );
                 await sendWhatsApp(from, friendly, phone_number_id);
@@ -4040,7 +4104,12 @@ async function handlePinFlowSubmission({
           },
         },
       });
-      await triggerPinFlow(phone, phone_number_id, "CHANGE_PIN_NEW");
+      await triggerPinFlow(
+        phone,
+        phone_number_id,
+        "CHANGE_PIN_NEW",
+        "🔑 Enter your *new PIN*:",
+      );
       break;
     }
 
@@ -4055,23 +4124,66 @@ async function handlePinFlowSubmission({
           },
         },
       });
-      await triggerPinFlow(phone, phone_number_id, "CHANGE_PIN_CONFIRM");
+      await triggerPinFlow(
+        phone,
+        phone_number_id,
+        "CHANGE_PIN_CONFIRM",
+        "✅ Confirm your *new PIN* one more time:",
+      );
       break;
     }
 
     case "CHANGE_PIN_CONFIRM": {
       const { currentPin, newPin } = session.data.changePin;
 
+      // Check if new PIN and confirm PIN match
       if (pin !== newPin) {
         await sendWhatsApp(
           phone,
-          "❌ PINs do not match. Please start over.",
+          "❌ Your PINs do not match. Let's try again from the new PIN step.",
+          phone_number_id,
+        );
+        // Keep currentPin, reset new and confirm, go back to new PIN step
+        await updateSession(phone, {
+          data: {
+            ...session.data,
+            changePin: {
+              currentPin,
+              step: "ENTER_NEW_PIN",
+            },
+          },
+        });
+        await triggerPinFlow(
+          phone,
+          phone_number_id,
+          "CHANGE_PIN_NEW",
+          "🔑 Enter your *new PIN* again:",
+        );
+        return;
+      }
+
+      // Check if new PIN is same as current PIN
+      if (pin === currentPin) {
+        await sendWhatsApp(
+          phone,
+          "❌ Your new PIN cannot be the same as your current PIN. Please choose a different PIN.",
           phone_number_id,
         );
         await updateSession(phone, {
-          data: { ...session.data, changePin: null },
+          data: {
+            ...session.data,
+            changePin: {
+              currentPin,
+              step: "ENTER_NEW_PIN",
+            },
+          },
         });
-        await sendMainMenu(phone, phone_number_id);
+        await triggerPinFlow(
+          phone,
+          phone_number_id,
+          "CHANGE_PIN_NEW",
+          "🔑 Enter a *different new PIN*:",
+        );
         return;
       }
 
@@ -4407,7 +4519,12 @@ async function triggerFlow(toPhone, phone_number_id) {
   console.log("triggerFlow sent to", toPhone);
 }
 
-async function triggerPinFlow(toPhone, phone_number_id, pinContext) {
+async function triggerPinFlow(
+  toPhone,
+  phone_number_id,
+  pinContext,
+  customMessage,
+) {
   // pinContext is a string like "DEPOSIT", "SWAP", "WITHDRAW", "EXECUTE_WITHDRAW", "SWAP_QUOTE", "SEND"
   // We store it in session BEFORE calling this, so the nfm_reply handler knows what pin was for.
 
@@ -4425,7 +4542,7 @@ async function triggerPinFlow(toPhone, phone_number_id, pinContext) {
     interactive: {
       type: "flow",
       body: {
-        text: "🔐 Please enter your PIN to continue.",
+        text: customMessage || "🔐 Please enter your PIN to continue.",
       },
       action: {
         name: "flow",
