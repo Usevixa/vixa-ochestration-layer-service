@@ -1368,7 +1368,7 @@ router.post("/callback", async (req, res) => {
               case "CONTACT_SUPPORT": {
                 await sendWhatsApp(
                   from,
-                  `🛟 *VIXA Support*\n\nNeed help? Reach us via:\n\n📱 *WhatsApp:* +234 8123453322\n📧 *Email:* support@vixa.app\n\nPlease include your registered phone number when contacting support.\n\nWhat else can I help you with?`,
+                  `🛟 *VIXA Support*\n\nNeed help? Reach us via:\n\n📧 *Email:* usevixa@gmail.com\n\nPlease include your registered phone number when contacting support.\n\nWhat else can I help you with?`,
                   phone_number_id,
                 );
                 await sendMainMenu(from, phone_number_id);
