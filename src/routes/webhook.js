@@ -1365,6 +1365,15 @@ router.post("/callback", async (req, res) => {
 
                 break;
               }
+              case "CONTACT_SUPPORT": {
+                await sendWhatsApp(
+                  from,
+                  `🛟 *VIXA Support*\n\nNeed help? Reach us via:\n\n📱 *WhatsApp:* +234 8123453322\n📧 *Email:* support@vixa.app\n\nPlease include your registered phone number when contacting support.\n\nWhat else can I help you with?`,
+                  phone_number_id,
+                );
+                await sendMainMenu(from, phone_number_id);
+                break;
+              }
             }
 
             continue;
@@ -2001,6 +2010,15 @@ router.post("/callback", async (req, res) => {
                   }
                   balanceText += `\n📅 Last updated: ${formattedDate}`;
                   await sendWhatsApp(from, balanceText, phone_number_id);
+                  return;
+                }
+                if (flow === "SUPPORT") {
+                  await sendWhatsApp(
+                    from,
+                    `🛟 *VIXA Support*\n\nNeed help? Reach us via:\n\n📧 *Email:* usevixa@gmail.com\n\nPlease include your registered phone number when contacting support.\n\nWhat else can I help you with?`,
+                    phone_number_id,
+                  );
+                  await sendMainMenu(from, phone_number_id);
                   return;
                 }
 
@@ -3095,7 +3113,6 @@ async function processFlowCompletion(phone, phone_number_id, form) {
 
   console.log("Extracted Onboarding Data:", { firstName, lastName, nin });
 
-  
   if (
     !firstName ||
     !lastName ||
@@ -3277,6 +3294,11 @@ Let’s get you started 🚀`,
                       id: "GET_WALLET_BALANCE",
                       title: "See Wallet Balances",
                       description: "check wallet balances",
+                    },
+                    {
+                      id: "CONTACT_SUPPORT",
+                      title: "Contact Support",
+                      description: "Get help from VIXA team",
                     },
                   ],
                 },
@@ -4114,6 +4136,11 @@ async function sendMainMenu(to, phone_number_id) {
                   id: "GET_WALLET_BALANCE",
                   title: "See Wallet Balances",
                   description: "Check wallet balances",
+                },
+                {
+                  id: "CONTACT_SUPPORT",
+                  title: "Contact Support",
+                  description: "Get help from VIXA team",
                 },
               ],
             },
