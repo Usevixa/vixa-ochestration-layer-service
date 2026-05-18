@@ -35,8 +35,9 @@ export async function analyzeUserIntent(message, sessionData) {
   - If the user says hello, asks a general question, or sends something unrelated to the context AND is not requesting a financial action, set intent to "CHITCHAT_OR_CLARIFY". Generate a friendly 'replyMessage' that answers them AND gently reminds them of the CURRENT CONTEXT.
   - If the user wants to cancel, stop, or go back with NO new financial action mentioned, set intent to "CANCEL_FLOW". Set detectedFlow to null.
   - If the user wants to do a specific financial action (deposit, withdraw, swap, send, receive, check balance), set intent to "START_SPECIFIC_FLOW" and set detectedFlow to the matching value.
+  - If the user asks about support, help, contact details, customer service, or how to reach VIXA, this is ALWAYS "START_SPECIFIC_FLOW" with detectedFlow set to "SUPPORT".
   
-  detectedFlow must be one of: "DEPOSIT", "WITHDRAW", "SWAP", "SEND", "RECEIVE", "BALANCE", or null.
+  detectedFlow must be one of: "DEPOSIT", "WITHDRAW", "SWAP", "SEND", "RECEIVE", "BALANCE", "SUPPORT", or null.
   `;
 
   const completion = await openai.chat.completions.create({
