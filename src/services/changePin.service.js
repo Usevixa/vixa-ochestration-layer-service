@@ -44,3 +44,40 @@ export async function changePinRequest({ currentPin, newPin, confirmPin, otpCode
     return { success: false, error: error?.response?.data || error.message };
   }
 }
+
+
+export async function lockWallet({ pin, reason }) {
+  try {
+    const token = await getToken();
+    const res = await axios.post(
+      `${BASE_URL}/account/wallet/lock`,
+      { pin, reason },
+      {
+        httpsAgent,
+        headers: { Authorization: `Bearer ${token}` },
+      },
+    );
+    return { success: true, data: res.data };
+  } catch (error) {
+    console.error("Lock Wallet Error:", error?.response?.data || error.message);
+    return { success: false, error: error?.response?.data || error.message };
+  }
+}
+
+export async function unlockWallet({ pin, otpCode }) {
+  try {
+    const token = await getToken();
+    const res = await axios.post(
+      `${BASE_URL}/account/wallet/unlock`,
+      { pin, otpCode },
+      {
+        httpsAgent,
+        headers: { Authorization: `Bearer ${token}` },
+      },
+    );
+    return { success: true, data: res.data };
+  } catch (error) {
+    console.error("Unlock Wallet Error:", error?.response?.data || error.message);
+    return { success: false, error: error?.response?.data || error.message };
+  }
+}

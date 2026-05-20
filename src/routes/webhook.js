@@ -37,6 +37,8 @@ import { fetchRates } from "../services/rates.service.js";
 import {
   requestChangePinOtp,
   changePinRequest,
+  lockWallet,
+  unlockWallet
 } from "../services/changePin.service.js";
 // IMPORTANT: Ensure this file has the correct two-stage encryption/decryption functions
 import { decryptRequest, encryptResponse } from "../utils/decrypt.js";
@@ -977,13 +979,46 @@ router.post("/callback", async (req, res) => {
               return;
             }
 
-            if (actionId === "LOCK_UNLOCK_WALLET") {
+            if (actionId === "LOCK_WALLET") {
+              await updateSession(from, {
+                data: {
+                  ...session.data,
+                  lockWallet: { step: "ENTER_REASON" },
+                },
+              });
               await sendWhatsApp(
                 from,
-                "🔒 Lock/Unlock Wallet is coming soon. Stay tuned!",
+                "🔒 *Lock Wallet*\n\nPlease tell us the reason you want to lock your wallet:\n\n(e.g. Lost phone, Suspicious activity, Going on vacation)",
                 phone_number_id,
               );
-              await sendMainMenu(from, phone_number_id);
+              return;
+            }
+
+            if (actionId === "UNLOCK_WALLET") {
+              // Immediately request OTP before asking anything
+              const otpRes = await requestChangePinOtp();
+
+              if (!otpRes.success) {
+                const friendly = await humanizeError(
+                  otpRes.error?.message || "Unknown error",
+                  "request an OTP to unlock wallet",
+                );
+                await sendWhatsApp(from, friendly, phone_number_id);
+                return;
+              }
+
+              await updateSession(from, {
+                data: {
+                  ...session.data,
+                  unlockWallet: { step: "ENTER_OTP" },
+                },
+              });
+
+              await sendWhatsApp(
+                from,
+                "🔓 *Unlock Wallet*\n\nAn OTP has been sent to your WhatsApp number.\n\nPlease type the OTP here to continue:",
+                phone_number_id,
+              );
               return;
             }
 
@@ -1426,9 +1461,14 @@ router.post("/callback", async (req, res) => {
                                 description: "Update your 4-digit PIN",
                               },
                               {
-                                id: "LOCK_UNLOCK_WALLET",
-                                title: "Lock / Unlock Wallet",
-                                description: "Control wallet access",
+                                id: "LOCK_WALLET",
+                                title: "Lock Wallet",
+                                description: "Lock your wallet access",
+                              },
+                              {
+                                id: "UNLOCK_WALLET",
+                                title: "Unlock Wallet",
+                                description: "Restore your wallet access",
                               },
                             ],
                           },
@@ -1830,7 +1870,9 @@ router.post("/callback", async (req, res) => {
                 session.data?.send?.step,
               ) ||
               ["ENTER_AMOUNT"].includes(session.data?.swap?.step) ||
-              session.data?.changePin?.step === "ENTER_OTP";
+              session.data?.changePin?.step === "ENTER_OTP" ||
+              ["ENTER_REASON"].includes(session.data?.lockWallet?.step) ||
+              ["ENTER_OTP"].includes(session.data?.unlockWallet?.step);
 
             if (!isInActiveFlow) {
               const aiAnalysis = await analyzeUserIntent(rawText, session.data);
@@ -2645,6 +2687,72 @@ router.post("/callback", async (req, res) => {
             //   await sendMainMenu(from, phone_number_id);
             //   return;
             // }
+
+            // --- LOCK WALLET FLOW ---
+            if (session.data?.lockWallet?.step === "ENTER_REASON") {
+              const reason = rawText;
+
+              if (!reason || reason.length < 3) {
+                await sendWhatsApp(
+                  from,
+                  "⚠️ Please provide a reason (at least 3 characters).",
+                  phone_number_id,
+                );
+                return;
+              }
+
+              await updateSession(from, {
+                data: {
+                  ...session.data,
+                  lockWallet: {
+                    ...session.data.lockWallet,
+                    reason,
+                    step: "ENTER_PIN",
+                  },
+                },
+              });
+
+              await triggerPinFlow(
+                from,
+                phone_number_id,
+                "LOCK_WALLET",
+                "🔒 Enter your *PIN* to confirm locking your wallet:",
+              );
+              return;
+            }
+
+            // --- UNLOCK WALLET FLOW ---
+            if (session.data?.unlockWallet?.step === "ENTER_OTP") {
+              const otpCode = rawText;
+
+              if (!otpCode || otpCode.length < 4) {
+                await sendWhatsApp(
+                  from,
+                  "⚠️ Please enter a valid OTP.",
+                  phone_number_id,
+                );
+                return;
+              }
+
+              await updateSession(from, {
+                data: {
+                  ...session.data,
+                  unlockWallet: {
+                    ...session.data.unlockWallet,
+                    otpCode,
+                    step: "ENTER_PIN",
+                  },
+                },
+              });
+
+              await triggerPinFlow(
+                from,
+                phone_number_id,
+                "UNLOCK_WALLET",
+                "🔓 Enter your *PIN* to confirm unlocking your wallet:",
+              );
+              return;
+            }
 
             if (session.data?.changePin?.step === "ENTER_OTP") {
               const otpCode = rawText;
@@ -4220,6 +4328,81 @@ async function handlePinFlowSubmission({
         "✅ An OTP has been sent to your WhatsApp number.\n\nPlease type it here to complete your PIN change:",
         phone_number_id,
       );
+      break;
+    }
+
+    case "LOCK_WALLET": {
+      const { reason } = session.data.lockWallet;
+
+      const lockRes = await lockWallet({ pin, reason });
+
+      if (!lockRes.success) {
+        const rawError = lockRes.error?.message || "Unknown error";
+        const friendly = await humanizeError(rawError, "lock your wallet");
+        await sendWhatsApp(phone, friendly, phone_number_id);
+        await updateSession(phone, {
+          data: { ...session.data, lockWallet: null },
+        });
+        await sendMainMenu(phone, phone_number_id);
+        return;
+      }
+
+      await sendWhatsApp(
+        phone,
+        "🔒 *Wallet Locked Successfully!*\n\nYour wallet has been locked. To unlock it, go to Settings → Unlock Wallet.",
+        phone_number_id,
+      );
+      await updateSession(phone, {
+        data: { ...session.data, lockWallet: null },
+      });
+      await sendMainMenu(phone, phone_number_id);
+      break;
+    }
+
+    case "UNLOCK_WALLET": {
+      const { otpCode } = session.data.unlockWallet;
+
+      const unlockRes = await unlockWallet({ pin, otpCode });
+
+      if (!unlockRes.success) {
+        const rawError = unlockRes.error?.message || "Unknown error";
+        const errorLower = rawError.toLowerCase();
+
+        if (
+          errorLower.includes("otp") ||
+          errorLower.includes("invalid code") ||
+          errorLower.includes("expired")
+        ) {
+          await sendWhatsApp(
+            phone,
+            "❌ The OTP is invalid or has expired. Please request a new OTP by going to Settings → Unlock Wallet again.",
+            phone_number_id,
+          );
+          await updateSession(phone, {
+            data: { ...session.data, unlockWallet: null },
+          });
+          await sendMainMenu(phone, phone_number_id);
+          return;
+        }
+
+        const friendly = await humanizeError(rawError, "unlock your wallet");
+        await sendWhatsApp(phone, friendly, phone_number_id);
+        await updateSession(phone, {
+          data: { ...session.data, unlockWallet: null },
+        });
+        await sendMainMenu(phone, phone_number_id);
+        return;
+      }
+
+      await sendWhatsApp(
+        phone,
+        "🔓 *Wallet Unlocked Successfully!*\n\nYour wallet is now active. You can continue using VIXA normally.",
+        phone_number_id,
+      );
+      await updateSession(phone, {
+        data: { ...session.data, unlockWallet: null },
+      });
+      await sendMainMenu(phone, phone_number_id);
       break;
     }
 
