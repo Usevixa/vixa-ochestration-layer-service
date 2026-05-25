@@ -1016,7 +1016,7 @@ router.post("/callback", async (req, res) => {
 
               await sendWhatsApp(
                 from,
-                "🔓 *Unlock Wallet*\n\nAn OTP has been sent to your WhatsApp number.\n\nPlease type the OTP here to continue:",
+                "🔓 *Unlock Wallet*\n\nAn OTP has been sent to your Email Address.\n\nPlease type the OTP here to continue:",
                 phone_number_id,
               );
               return;

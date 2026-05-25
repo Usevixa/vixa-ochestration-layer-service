@@ -19,16 +19,6 @@ export async function fetchWalletBalances(coin = "") {
 
     console.log("fetching wallet Balances", res);
 
-    /**
-     * Expected response shape:
-     * {
-     *   success: true,
-     *   message: "...",
-     *   data: {
-     *     success: true,
-     *     data: [ { coin, available, locked, chain } ]
-     *   }
-     */
     return res.data?.data?.data || [];
   } catch (err) {
     console.error(
