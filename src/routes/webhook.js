@@ -996,7 +996,7 @@ router.post("/callback", async (req, res) => {
 
             if (actionId === "UNLOCK_WALLET") {
               // Immediately request OTP before asking anything
-              const otpRes = await requestChangePinOtp();
+              const otpRes = await requestChangePinOtp("UnlockWallet");
 
               if (!otpRes.success) {
                 const friendly = await humanizeError(
@@ -4296,7 +4296,7 @@ async function handlePinFlowSubmission({
       }
 
       // Request OTP — backend sends it to user's WhatsApp
-      const otpRes = await requestChangePinOtp();
+      const otpRes = await requestChangePinOtp("ChangePIN");
 
       if (!otpRes.success) {
         const friendly = await humanizeError(

@@ -9,12 +9,12 @@ const httpsAgent = new https.Agent({
   timeout: 30000,
 });
 
-export async function requestChangePinOtp() {
+export async function requestChangePinOtp(purpose = "ChangePIN") {
   try {
     const token = await getToken();
     const res = await axios.post(
       `${BASE_URL}/account/request-otp`,
-      { purpose: "ChangePIN" },
+      { purpose },  // ✅ now dynamic
       {
         httpsAgent,
         headers: { Authorization: `Bearer ${token}` },
