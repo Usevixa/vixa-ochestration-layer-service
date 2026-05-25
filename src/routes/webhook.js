@@ -40,7 +40,7 @@ import {
   lockWallet,
   unlockWallet
 } from "../services/changePin.service.js";
-// IMPORTANT: Ensure this file has the correct two-stage encryption/decryption functions
+
 import { decryptRequest, encryptResponse } from "../utils/decrypt.js";
 
 const router = express.Router();
