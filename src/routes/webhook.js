@@ -38,7 +38,7 @@ import {
   requestChangePinOtp,
   changePinRequest,
   lockWallet,
-  unlockWallet
+  unlockWallet,
 } from "../services/changePin.service.js";
 
 import { decryptRequest, encryptResponse } from "../utils/decrypt.js";
@@ -4363,6 +4363,9 @@ async function handlePinFlowSubmission({
       const { otpCode } = session.data.unlockWallet;
 
       const unlockRes = await unlockWallet({ pin, otpCode });
+
+      console.log(unlockRes, "unlockresponse");
+      console.log(otpCode, pin, "response from unlocking");
 
       if (!unlockRes.success) {
         const rawError = unlockRes.error?.message || "Unknown error";
