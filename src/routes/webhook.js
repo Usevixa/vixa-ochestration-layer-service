@@ -2768,7 +2768,7 @@ router.post("/callback", async (req, res) => {
                 } else {
                   await sendWhatsApp(
                     from,
-                    "✅ A new OTP has been sent to your WhatsApp number.\n\nPlease type it here:",
+                    "✅ A new OTP has been sent to your Email Address.\n\nPlease type it here:",
                     phone_number_id,
                   );
                 }
@@ -4325,7 +4325,7 @@ async function handlePinFlowSubmission({
 
       await sendWhatsApp(
         phone,
-        "✅ An OTP has been sent to your WhatsApp number.\n\nPlease type it here to complete your PIN change:",
+        "✅ An OTP has been sent to your Email Address.\n\nPlease type it here to complete your PIN change:",
         phone_number_id,
       );
       break;
