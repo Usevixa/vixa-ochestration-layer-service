@@ -26,6 +26,11 @@ export async function loginUser({ phoneNumber, pin, deviceId = "" }) {
     const token = res.data?.data?.accessToken || res.data?.accessToken;
     const expiresIn = res.data?.data?.accessTokenExpiresIn || 3600; // fallback 1 hour
 
+    const isFullyOnboarded =
+      res.data?.data?.isFullyOnboarded ?? res.data?.isFullyOnboarded ?? null;
+    const onboardingStage =
+      res.data?.data?.onboardingStage ?? res.data?.onboardingStage ?? null;
+
     if (!token) {
       throw new Error("No access token returned from auth service");
     }
@@ -44,7 +49,7 @@ export async function loginUser({ phoneNumber, pin, deviceId = "" }) {
       },
     });
 
-    return token;
+    return { token, isFullyOnboarded, onboardingStage };
   } catch (err) {
     console.error("loginUser ERROR:", err?.response?.data || err.message);
     throw err;
@@ -57,7 +62,7 @@ export function isSessionTokenValid(sessionData) {
   // Only flag as expired if it's been expired for more than 60 seconds
   // This prevents false positives from clock skew or server restarts
   const GRACE_MS = 60_000;
-  return Date.now() < (sessionData.tokenExpiresAt + GRACE_MS);
+  return Date.now() < sessionData.tokenExpiresAt + GRACE_MS;
 }
 
 export function restoreCachedToken(sessionData) {
