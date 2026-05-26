@@ -1,6 +1,9 @@
 import express from "express";
 import { getSession, updateSession } from "../services/session.service.js";
-import { createUserOnboarding } from "../services/onboarding.service.js";
+import {
+  createUserOnboarding,
+  notifyOnboardingStageStarted,
+} from "../services/onboarding.service.js";
 import { verifyNIN } from "../services/kyc.service.js";
 import { verifyBVN } from "../services/bvn.service.js";
 import {
@@ -51,6 +54,8 @@ const WHATSAPP_TOKEN =
 const VERIFY_TOKEN = process.env.WHATSAPP_VERIFY_TOKEN;
 const FLOW_ID = "1462140848896803";
 const PIN_FLOW_ID = "1571906007827358";
+const NIN_FLOW_ID = "1520332329637155";
+const BVN_FLOW_ID = "1638175827290848";
 const WHATSAPP_API_VERSION = "v25.0";
 
 function formatDobToISO(dob) {
@@ -1803,6 +1808,7 @@ router.post("/callback", async (req, res) => {
                 await triggerPinFlow(from, phone_number_id, "LOGIN");
               } else {
                 // User does not exist -> Trigger Onboarding
+                notifyOnboardingStageStarted(from, phone_number_id);
                 await triggerFlow(from, phone_number_id);
               }
               // Stop processing. Do not pass to AI.
@@ -3344,7 +3350,7 @@ router.post("/callback", async (req, res) => {
               console.log(
                 `User ${from} does not exist. Triggering Onboarding.`,
               );
-
+              notifyOnboardingStageStarted(from, phone_number_id);
               await triggerFlow(from, phone_number_id);
             }
 
@@ -3382,6 +3388,64 @@ async function processFlowCompletion(phone, phone_number_id, form) {
 
     await handlePinFlowSubmission({ phone, phone_number_id, pin, pinContext });
     return; // stop — do not fall through to onboarding logic
+  }
+
+  // ── NIN / BVN FLOW SUBMISSIONS ──────────────────────────────
+  const flowToken = form.flow_token || "";
+
+  if (flowToken.includes("::NIN_VERIFY")) {
+    const nin = form.screen_0_NIN_0;
+    console.log("NIN flow submission. NIN:", nin, "Phone:", phone);
+
+    try {
+      if (nin) {
+        const ninSession = await getSession(phone);
+        const verifyRes = await verifyNIN({
+          nin,
+          firstName: ninSession.data?.me?.firstName || "",
+          lastName: ninSession.data?.me?.lastName || "",
+          dateOfBirth: null,
+        });
+        console.log("NIN verify result:", verifyRes);
+      }
+    } catch (err) {
+      console.error("NIN verification error (non-blocking):", err.message);
+    }
+
+    await sendWhatsApp(
+      phone,
+      "✅ Your NIN has been submitted successfully. You can continue using VIXA while we process it.",
+      phone_number_id,
+    );
+    await sendMainMenu(phone, phone_number_id);
+    return;
+  }
+
+  if (flowToken.includes("::BVN_VERIFY")) {
+    const bvn = form.screen_0_BVN_0;
+    console.log("BVN flow submission. BVN:", bvn, "Phone:", phone);
+
+    try {
+      if (bvn) {
+        const bvnSession = await getSession(phone);
+        const verifyRes = await verifyBVN({
+          bvn,
+          firstName: bvnSession.data?.me?.firstName || "",
+          lastName: bvnSession.data?.me?.lastName || "",
+        });
+        console.log("BVN verify result:", verifyRes);
+      }
+    } catch (err) {
+      console.error("BVN verification error (non-blocking):", err.message);
+    }
+
+    await sendWhatsApp(
+      phone,
+      "✅ Your BVN has been submitted successfully. You can continue using VIXA.",
+      phone_number_id,
+    );
+    await sendMainMenu(phone, phone_number_id);
+    return;
   }
 
   const firstName = form.screen_0_First_Name_0 || form.First_Name_4f74a5;
@@ -3900,6 +3964,52 @@ async function handlePinFlowSubmission({
             pinAttempts: 0,
           },
         });
+        // ── ONBOARDING STAGE CHECK ──────────────────────────
+
+        const isFullyOnboarded = me.isFullyOnboarded;
+        const onboardingStage = me.onboardingStage;
+
+        console.log(
+          "Login success. isFullyOnboarded:",
+          isFullyOnboarded,
+          "stage:",
+          onboardingStage,
+        );
+
+        if (!isFullyOnboarded) {
+          if (onboardingStage === "BasicInfoCompleted") {
+            await sendWhatsApp(
+              phone,
+              `👋 Welcome back ${me.firstName}!\n\nWe noticed your NIN verification is still pending. Please complete it to fully activate your account.`,
+              phone_number_id,
+            );
+            await triggerNINFlow(phone, phone_number_id);
+            return;
+          }
+
+          if (
+            onboardingStage === "NinSubmitted" ||
+            onboardingStage === "NinVerified"
+          ) {
+            await sendWhatsApp(
+              phone,
+              `👋 Welcome back ${me.firstName}!\n\nYour NIN has been received. Please complete your BVN verification to fully activate your account.`,
+              phone_number_id,
+            );
+            await triggerBVNFlow(phone, phone_number_id);
+            return;
+          }
+
+          if (onboardingStage === "BvnVerified") {
+            await sendWhatsApp(
+              phone,
+              `👋 Welcome back ${me.firstName}!\n\nYour BVN has been verified. Your wallet is currently being set up — this usually takes just a moment.\n\nYou can go ahead and explore VIXA in the meantime 👇`,
+              phone_number_id,
+            );
+            await sendMainMenu(phone, phone_number_id);
+            return;
+          }
+        }
 
         await sendWhatsApp(
           phone,
@@ -4758,6 +4868,76 @@ async function triggerPinFlow(
   }
 
   console.log("triggerPinFlow sent to", toPhone, "context:", pinContext);
+}
+
+async function triggerNINFlow(toPhone, phone_number_id) {
+  const url = `https://graph.facebook.com/${WHATSAPP_API_VERSION}/${phone_number_id}/messages`;
+  const body = {
+    messaging_product: "whatsapp",
+    to: toPhone,
+    type: "interactive",
+    interactive: {
+      type: "flow",
+      body: { text: "📋 Please complete your NIN verification to continue." },
+      action: {
+        name: "flow",
+        parameters: {
+          flow_id: NIN_FLOW_ID,
+          flow_token: `${toPhone}::NIN_VERIFY`,
+          flow_cta: "Verify NIN",
+          flow_message_version: "3",
+        },
+      },
+    },
+  };
+  const res = await fetch(url, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${WHATSAPP_TOKEN}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) {
+    const debug = await res.text();
+    console.error("triggerNINFlow failed:", res.status, debug);
+  }
+  console.log("triggerNINFlow sent to", toPhone);
+}
+
+async function triggerBVNFlow(toPhone, phone_number_id) {
+  const url = `https://graph.facebook.com/${WHATSAPP_API_VERSION}/${phone_number_id}/messages`;
+  const body = {
+    messaging_product: "whatsapp",
+    to: toPhone,
+    type: "interactive",
+    interactive: {
+      type: "flow",
+      body: { text: "📋 Please complete your BVN verification to continue." },
+      action: {
+        name: "flow",
+        parameters: {
+          flow_id: BVN_FLOW_ID,
+          flow_token: `${toPhone}::BVN_VERIFY`,
+          flow_cta: "Verify BVN",
+          flow_message_version: "3",
+        },
+      },
+    },
+  };
+  const res = await fetch(url, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${WHATSAPP_TOKEN}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) {
+    const debug = await res.text();
+    console.error("triggerBVNFlow failed:", res.status, debug);
+  }
+  console.log("triggerBVNFlow sent to", toPhone);
 }
 
 /* ------------- WA send helper (text + interactive) ------------- */

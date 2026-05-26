@@ -40,3 +40,16 @@ export async function createUserOnboarding({
     return { success: false, error: err?.response?.data || err?.message };
   }
 }
+
+export async function notifyOnboardingStageStarted(phoneNumber, phoneNumberId) {
+  try {
+    await fetch("https://api.usevixa.com/api/v1/onboarding/stage/started", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ phoneNumber, phoneNumberId }),
+    });
+    console.log("Onboarding stage started notified for", phoneNumber);
+  } catch (err) {
+    console.error("notifyOnboardingStageStarted failed:", err.message);
+  }
+}
