@@ -3508,7 +3508,11 @@ async function processFlowCompletion(phone, phone_number_id, form) {
     try {
       console.log("here here", phone, pin);
 
-      loginToken = await loginUser({ phoneNumber: phone, pin: onboardingPin });
+      const { token: loginToken } = await loginUser({
+        phoneNumber: phone,
+        pin: onboardingPin,
+      });
+      console.log(loginToken, "loginTokenloginToken");
       console.log(loginToken, "loginTokenloginToken");
     } catch (e) {
       console.log(
@@ -3950,7 +3954,10 @@ async function handlePinFlowSubmission({
     // ─────────────────────────────────────────────
     case "LOGIN": {
       try {
-        await loginUser({ phoneNumber: phone, pin });
+        const loginResult = await loginUser({ phoneNumber: phone, pin });
+
+        // loginResult now has { token, isFullyOnboarded, onboardingStage }
+        const { isFullyOnboarded, onboardingStage } = loginResult;
         const me = await fetchAuthMe();
         if (!me) throw new Error("ME_NOT_FOUND");
 
@@ -3966,8 +3973,6 @@ async function handlePinFlowSubmission({
         });
         // ── ONBOARDING STAGE CHECK ──────────────────────────
 
-        const isFullyOnboarded = me.isFullyOnboarded;
-        const onboardingStage = me.onboardingStage;
 
         console.log(
           "Login success. isFullyOnboarded:",
