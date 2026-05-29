@@ -2970,36 +2970,6 @@ router.post("/callback", async (req, res) => {
             //   return;
             // }
 
-            // if (session.data?.withdraw?.step === "ENTER_ACCOUNT_NAME") {
-            //   const accountName = msg.text?.body?.trim();
-
-            //   if (!accountName || accountName.length < 2) {
-            //     await sendWhatsApp(
-            //       from,
-            //       "⚠️ Please enter a valid account name.",
-            //       phone_number_id,
-            //     );
-            //     return;
-            //   }
-
-            //   await updateSession(from, {
-            //     data: {
-            //       ...session.data,
-            //       withdraw: {
-            //         ...session.data.withdraw,
-            //         accountName,
-            //         step: "ENTER_ACCOUNT_NUMBER_OTHER",
-            //       },
-            //     },
-            //   });
-
-            //   await sendWhatsApp(
-            //     from,
-            //     "🔢 Please enter your *Account Number*:",
-            //     phone_number_id,
-            //   );
-            //   return;
-            // }
 
             if (session.data?.withdraw?.step === "ENTER_ACCOUNT_NAME") {
               const accountName = msg.text?.body?.trim();
