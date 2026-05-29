@@ -3394,57 +3394,71 @@ async function processFlowCompletion(phone, phone_number_id, form) {
   const flowToken = form.flow_token || "";
 
   if (flowToken.includes("::NIN_VERIFY")) {
-  const nin = form.screen_0_NIN_0;
+    const nin = form.screen_0_NIN_0;
+    const rawDob = form.screen_0_Date_of_Birth_1;
 
-  try {
-    if (nin) {
-      const me = await fetchAuthMe(); // ← fetch live instead of from session
-      const verifyRes = await verifyNIN({
-        nin,
-        firstName: me?.firstName || "",
-        lastName: me?.lastName || "",
-        dateOfBirth: null,
-      });
-      console.log("NIN verify result:", verifyRes);
+    try {
+      if (nin) {
+        const me = await fetchAuthMe();
+        const formattedDob = formatDobToISO(rawDob);
+        const verifyRes = await verifyNIN({
+          nin,
+          firstName: me?.firstName || "",
+          lastName: me?.lastName || "",
+          dateOfBirth: formattedDob,
+        });
+        console.log("NIN verify result:", verifyRes);
+
+        const bvnStatus = verifyRes?.data?.data?.bvnStatus;
+
+        if (bvnStatus === "NotStarted") {
+          await sendWhatsApp(
+            phone,
+            "✅ Your NIN has been submitted. To complete your account setup, please also verify your BVN.",
+            phone_number_id,
+          );
+          await triggerBVNFlow(phone, phone_number_id);
+          return;
+        }
+      }
+    } catch (err) {
+      console.error("NIN verification error (non-blocking):", err.message);
     }
-  } catch (err) {
-    console.error("NIN verification error (non-blocking):", err.message);
-  }
 
-  await sendWhatsApp(
-    phone,
-    "✅ Your NIN has been submitted successfully. You can continue using VIXA while we process it.",
-    phone_number_id,
-  );
-  await sendMainMenu(phone, phone_number_id);
-  return;
-}
+    await sendWhatsApp(
+      phone,
+      "✅ Your NIN has been submitted successfully. You can continue using VIXA.",
+      phone_number_id,
+    );
+    await sendMainMenu(phone, phone_number_id);
+    return;
+  }
 
   if (flowToken.includes("::BVN_VERIFY")) {
-  const bvn = form.screen_0_BVN_0;
+    const bvn = form.screen_0_BVN_0;
 
-  try {
-    if (bvn) {
-      const me = await fetchAuthMe(); // ← same fix
-      const verifyRes = await verifyBVN({
-        bvn,
-        firstName: me?.firstName || "",
-        lastName: me?.lastName || "",
-      });
-      console.log("BVN verify result:", verifyRes);
+    try {
+      if (bvn) {
+        const me = await fetchAuthMe(); // ← same fix
+        const verifyRes = await verifyBVN({
+          bvn,
+          firstName: me?.firstName || "",
+          lastName: me?.lastName || "",
+        });
+        console.log("BVN verify result:", verifyRes);
+      }
+    } catch (err) {
+      console.error("BVN verification error (non-blocking):", err.message);
     }
-  } catch (err) {
-    console.error("BVN verification error (non-blocking):", err.message);
-  }
 
-  await sendWhatsApp(
-    phone,
-    "✅ Your BVN has been submitted successfully. You can continue using VIXA.",
-    phone_number_id,
-  );
-  await sendMainMenu(phone, phone_number_id);
-  return;
-}
+    await sendWhatsApp(
+      phone,
+      "✅ Your BVN has been submitted successfully. You can continue using VIXA.",
+      phone_number_id,
+    );
+    await sendMainMenu(phone, phone_number_id);
+    return;
+  }
 
   const firstName = form.screen_0_First_Name_0 || form.First_Name_4f74a5;
   const lastName = form.screen_0_Last_Name_1 || form.Last_Name_76477c;
@@ -3970,7 +3984,6 @@ async function handlePinFlowSubmission({
           },
         });
         // ── ONBOARDING STAGE CHECK ──────────────────────────
-
 
         console.log(
           "Login success. isFullyOnboarded:",
