@@ -1877,8 +1877,8 @@ router.post("/callback", async (req, res) => {
               ) ||
               ["ENTER_AMOUNT"].includes(session.data?.swap?.step) ||
               session.data?.changePin?.step === "ENTER_OTP" ||
-              ["ENTER_REASON"].includes(session.data?.lockWallet?.step) ||
-              ["ENTER_OTP"].includes(session.data?.unlockWallet?.step);
+              ["ENTER_REASON", "ENTER_PIN"].includes(session.data?.lockWallet?.step) ||
+              ["ENTER_OTP", "ENTER_PIN"].includes(session.data?.unlockWallet?.step);
 
             if (!isInActiveFlow) {
               const aiAnalysis = await analyzeUserIntent(rawText, session.data);
@@ -2134,6 +2134,102 @@ router.post("/callback", async (req, res) => {
                     phone_number_id,
                   );
                   await sendMainMenu(from, phone_number_id);
+                  return;
+                }
+                if (flow === "CHANGE_PIN") {
+                  await updateSession(from, {
+                    data: {
+                      ...freshSession.data,
+                      changePin: { step: "ENTER_CURRENT_PIN" },
+                    },
+                  });
+                  await triggerPinFlow(
+                    from,
+                    phone_number_id,
+                    "CHANGE_PIN_CURRENT",
+                    "🔐 Enter your *current PIN* to begin the change:",
+                  );
+                  return;
+                }
+
+                if (flow === "LOCK_WALLET") {
+                  await updateSession(from, {
+                    data: {
+                      ...freshSession.data,
+                      lockWallet: { step: "ENTER_REASON" },
+                    },
+                  });
+                  await sendWhatsApp(
+                    from,
+                    "🔒 *Lock Wallet*\n\nPlease tell us the reason you want to lock your wallet:\n\n(e.g. Lost phone, Suspicious activity, Going on vacation)",
+                    phone_number_id,
+                  );
+                  return;
+                }
+
+                if (flow === "UNLOCK_WALLET") {
+                  const otpRes = await requestChangePinOtp("UnlockWallet");
+                  if (!otpRes.success) {
+                    const friendly = await humanizeError(
+                      otpRes.error?.message || "Unknown error",
+                      "request an OTP to unlock wallet",
+                    );
+                    await sendWhatsApp(from, friendly, phone_number_id);
+                    return;
+                  }
+                  await updateSession(from, {
+                    data: {
+                      ...freshSession.data,
+                      unlockWallet: { step: "ENTER_OTP" },
+                    },
+                  });
+                  await sendWhatsApp(
+                    from,
+                    "🔓 *Unlock Wallet*\n\nAn OTP has been sent to your Email Address.\n\nPlease type the OTP here to continue:",
+                    phone_number_id,
+                  );
+                  return;
+                }
+
+                if (flow === "SETTINGS") {
+                  await sendWhatsApp(
+                    from,
+                    {
+                      type: "interactive",
+                      interactive: {
+                        type: "list",
+                        body: {
+                          text: "⚙️ *Settings*\n\nWhat would you like to do?",
+                        },
+                        action: {
+                          button: "Select Option",
+                          sections: [
+                            {
+                              title: "Account Settings",
+                              rows: [
+                                {
+                                  id: "CHANGE_PIN",
+                                  title: "Change PIN",
+                                  description: "Update your 4-digit PIN",
+                                },
+                                {
+                                  id: "LOCK_WALLET",
+                                  title: "Lock Wallet",
+                                  description: "Lock your wallet access",
+                                },
+                                {
+                                  id: "UNLOCK_WALLET",
+                                  title: "Unlock Wallet",
+                                  description: "Restore your wallet access",
+                                },
+                              ],
+                            },
+                          ],
+                        },
+                      },
+                    },
+                    phone_number_id,
+                  );
                   return;
                 }
 
@@ -2969,7 +3065,6 @@ router.post("/callback", async (req, res) => {
             //   );
             //   return;
             // }
-
 
             if (session.data?.withdraw?.step === "ENTER_ACCOUNT_NAME") {
               const accountName = msg.text?.body?.trim();

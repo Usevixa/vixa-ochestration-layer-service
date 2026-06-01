@@ -36,6 +36,10 @@ export async function analyzeUserIntent(message, sessionData) {
   - If the user wants to cancel, stop, or go back with NO new financial action mentioned, set intent to "CANCEL_FLOW". Set detectedFlow to null.
   - If the user wants to do a specific financial action (deposit, withdraw, swap, send, receive, check balance), set intent to "START_SPECIFIC_FLOW" and set detectedFlow to the matching value.
   - If the user asks about support, help, contact details, customer service, or how to reach VIXA, this is ALWAYS "START_SPECIFIC_FLOW" with detectedFlow set to "SUPPORT".
+  - If the user wants to change their PIN, says "change PIN", "update PIN", "new PIN", or similar, this is ALWAYS "START_SPECIFIC_FLOW" with detectedFlow set to "CHANGE_PIN".
+  - If the user wants to lock their wallet, says "lock wallet", "secure my wallet", or similar, this is ALWAYS "START_SPECIFIC_FLOW" with detectedFlow set to "LOCK_WALLET".
+  - If the user wants to unlock their wallet, says "unlock wallet", "restore access", or similar, this is ALWAYS "START_SPECIFIC_FLOW" with detectedFlow set to "UNLOCK_WALLET".
+  - If the user says "settings", "account settings", "manage account", or similar, this is ALWAYS "START_SPECIFIC_FLOW" with detectedFlow set to "SETTINGS".
   
   detectedFlow must be one of: "DEPOSIT", "WITHDRAW", "SWAP", "SEND", "RECEIVE", "BALANCE", "SUPPORT", or null.
   `;
@@ -76,7 +80,7 @@ export async function analyzeUserIntent(message, sessionData) {
             detectedFlow: {
               type: "string",
               description:
-                "Which flow the user wants to start. One of: DEPOSIT, WITHDRAW, SWAP, SEND, RECEIVE, BALANCE, or null.",
+                "Which flow the user wants to start. One of: DEPOSIT, WITHDRAW, SWAP, SEND, RECEIVE, BALANCE, SUPPORT, CHANGE_PIN, LOCK_WALLET, UNLOCK_WALLET, SETTINGS, or null.",
             },
           },
           required: ["intent"],
