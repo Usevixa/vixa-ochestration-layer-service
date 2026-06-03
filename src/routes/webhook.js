@@ -4710,6 +4710,92 @@ async function routeToFlow(flow, from, phone_number_id, sessionData) {
       await sendMainMenu(from, phone_number_id);
       break;
     }
+    case "CHANGE_PIN": {
+      await updateSession(from, {
+        data: { ...sessionData, changePin: { step: "ENTER_CURRENT_PIN" } },
+      });
+      await triggerPinFlow(
+        from,
+        phone_number_id,
+        "CHANGE_PIN_CURRENT",
+        "🔐 Enter your *current PIN* to begin the change:",
+      );
+      break;
+    }
+
+    case "LOCK_WALLET": {
+      await updateSession(from, {
+        data: { ...sessionData, lockWallet: { step: "ENTER_REASON" } },
+      });
+      await sendWhatsApp(
+        from,
+        "🔒 *Lock Wallet*\n\nPlease tell us the reason you want to lock your wallet:\n\n(e.g. Lost phone, Suspicious activity, Going on vacation)",
+        phone_number_id,
+      );
+      break;
+    }
+
+    case "UNLOCK_WALLET": {
+      const otpRes = await requestChangePinOtp("UnlockWallet");
+      if (!otpRes.success) {
+        const friendly = await humanizeError(
+          otpRes.error?.message || "Unknown error",
+          "request an OTP to unlock wallet",
+        );
+        await sendWhatsApp(from, friendly, phone_number_id);
+        return;
+      }
+      await updateSession(from, {
+        data: { ...sessionData, unlockWallet: { step: "ENTER_OTP" } },
+      });
+      await sendWhatsApp(
+        from,
+        "🔓 *Unlock Wallet*\n\nAn OTP has been sent to your Email Address.\n\nPlease type the OTP here to continue:",
+        phone_number_id,
+      );
+      break;
+    }
+
+    case "SETTINGS": {
+      await sendWhatsApp(
+        from,
+        {
+          type: "interactive",
+          interactive: {
+            type: "list",
+            body: { text: "⚙️ *Settings*\n\nWhat would you like to do?" },
+            action: {
+              button: "Select Option",
+              sections: [
+                {
+                  title: "Account Settings",
+                  rows: [
+                    {
+                      id: "CHANGE_PIN",
+                      title: "Change PIN",
+                      description: "Update your 4-digit PIN",
+                    },
+                    {
+                      id: "LOCK_WALLET",
+                      title: "Lock Wallet",
+                      description: "Lock your wallet access",
+                    },
+                    {
+                      id: "UNLOCK_WALLET",
+                      title: "Unlock Wallet",
+                      description: "Restore your wallet access",
+                    },
+                  ],
+                },
+              ],
+            },
+          },
+        },
+        phone_number_id,
+      );
+      break;
+    }
+
     default: {
       await sendMainMenu(from, phone_number_id);
     }
