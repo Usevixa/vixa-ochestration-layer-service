@@ -1,17 +1,32 @@
-
-
 export const KEYWORD_INTENT_MAP = [
   // DEPOSIT triggers
   {
-    keywords: ["buy", "purchase", "fund", "top up", "topup", "add money",
-               "recharge", "load", "credit my wallet", "i want to buy",
-               "make deposit", "put money"],
+    keywords: [
+      "buy",
+      "purchase",
+      "fund",
+      "top up",
+      "topup",
+      "add money",
+      "recharge",
+      "load",
+      "credit my wallet",
+      "i want to buy",
+      "make deposit",
+      "put money",
+    ],
     flow: "DEPOSIT",
   },
   // WITHDRAW triggers
   {
-    keywords: ["withdraw", "cash out", "take out", "remove money",
-               "send to bank", "bank transfer"],
+    keywords: [
+      "withdraw",
+      "cash out",
+      "take out",
+      "remove money",
+      "send to bank",
+      "bank transfer",
+    ],
     flow: "WITHDRAW",
   },
   // SEND triggers
@@ -21,8 +36,13 @@ export const KEYWORD_INTENT_MAP = [
   },
   // RECEIVE triggers
   {
-    keywords: ["receive", "get crypto", "my address", "wallet address",
-               "deposit address"],
+    keywords: [
+      "receive",
+      "get crypto",
+      "my address",
+      "wallet address",
+      "deposit address",
+    ],
     flow: "RECEIVE",
   },
   // SWAP triggers
@@ -32,15 +52,79 @@ export const KEYWORD_INTENT_MAP = [
   },
   // BALANCE triggers
   {
-    keywords: ["balance", "how much", "check wallet", "my wallet",
-               "what do i have"],
+    keywords: [
+      "balance",
+      "how much",
+      "check wallet",
+      "my wallet",
+      "what do i have",
+    ],
     flow: "BALANCE",
+  },
+  {
+    keywords: [
+      "change pin",
+      "change my pin",
+      "update pin",
+      "update my pin",
+      "new pin",
+      "reset pin",
+      "i want to change pin",
+      "change password",
+    ],
+    flow: "CHANGE_PIN",
+  },
+  // LOCK WALLET triggers
+  {
+    keywords: [
+      "lock wallet",
+      "lock my wallet",
+      "secure my wallet",
+      "freeze wallet",
+      "freeze my wallet",
+      "i want to lock",
+    ],
+    flow: "LOCK_WALLET",
+  },
+  // UNLOCK WALLET triggers
+  {
+    keywords: [
+      "unlock wallet",
+      "unlock my wallet",
+      "restore access",
+      "unfreeze wallet",
+      "i want to unlock",
+      "open my wallet",
+    ],
+    flow: "UNLOCK_WALLET",
+  },
+  // SETTINGS triggers
+  {
+    keywords: [
+      "settings",
+      "account settings",
+      "manage account",
+      "my settings",
+      "open settings",
+    ],
+    flow: "SETTINGS",
   },
   // CANCEL triggers
   {
-    keywords: ["cancel", "stop", "abort", "forget it", "never mind",
-               "start over", "restart", "go back", "scratch that",
-               "leave it", "i don't want", "change my mind"],
+    keywords: [
+      "cancel",
+      "stop",
+      "abort",
+      "forget it",
+      "never mind",
+      "start over",
+      "restart",
+      "go back",
+      "scratch that",
+      "leave it",
+      "i don't want",
+      "change my mind",
+    ],
     flow: "CANCEL",
   },
 ];
