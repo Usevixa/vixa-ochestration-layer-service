@@ -1,66 +1,23 @@
 export const KEYWORD_INTENT_MAP = [
-  // DEPOSIT triggers
+  // CANCEL triggers — checked first
   {
     keywords: [
-      "buy",
-      "purchase",
-      "fund",
-      "top up",
-      "topup",
-      "add money",
-      "recharge",
-      "load",
-      "credit my wallet",
-      "i want to buy",
-      "make deposit",
-      "put money",
+      "cancel",
+      "stop",
+      "abort",
+      "forget it",
+      "never mind",
+      "start over",
+      "restart",
+      "go back",
+      "scratch that",
+      "leave it",
+      "i don't want",
+      "change my mind",
     ],
-    flow: "DEPOSIT",
+    flow: "CANCEL",
   },
-  // WITHDRAW triggers
-  {
-    keywords: [
-      "withdraw",
-      "cash out",
-      "take out",
-      "remove money",
-      "send to bank",
-      "bank transfer",
-    ],
-    flow: "WITHDRAW",
-  },
-  // SEND triggers
-  {
-    keywords: ["send", "transfer to", "pay someone", "send crypto"],
-    flow: "SEND",
-  },
-  // RECEIVE triggers
-  {
-    keywords: [
-      "receive",
-      "get crypto",
-      "my address",
-      "wallet address",
-      "deposit address",
-    ],
-    flow: "RECEIVE",
-  },
-  // SWAP triggers
-  {
-    keywords: ["swap", "convert", "exchange", "change btc", "change eth"],
-    flow: "SWAP",
-  },
-  // BALANCE triggers
-  {
-    keywords: [
-      "balance",
-      "how much",
-      "check wallet",
-      "my wallet",
-      "what do i have",
-    ],
-    flow: "BALANCE",
-  },
+  // CHANGE PIN triggers
   {
     keywords: [
       "change pin",
@@ -109,30 +66,71 @@ export const KEYWORD_INTENT_MAP = [
     ],
     flow: "SETTINGS",
   },
-  // CANCEL triggers
+  // DEPOSIT triggers
   {
     keywords: [
-      "cancel",
-      "stop",
-      "abort",
-      "forget it",
-      "never mind",
-      "start over",
-      "restart",
-      "go back",
-      "scratch that",
-      "leave it",
-      "i don't want",
-      "change my mind",
+      "buy",
+      "purchase",
+      "fund",
+      "top up",
+      "topup",
+      "add money",
+      "recharge",
+      "load",
+      "credit my wallet",
+      "i want to buy",
+      "make deposit",
+      "put money",
     ],
-    flow: "CANCEL",
+    flow: "DEPOSIT",
+  },
+  // WITHDRAW triggers — before SEND
+  {
+    keywords: [
+      "withdraw",
+      "cash out",
+      "take out",
+      "remove money",
+      "send to bank",
+      "bank transfer",
+    ],
+    flow: "WITHDRAW",
+  },
+  // SEND triggers
+  {
+    keywords: ["send crypto", "transfer to", "pay someone", "i want to send"],
+    flow: "SEND",
+  },
+  // RECEIVE triggers
+  {
+    keywords: [
+      "receive",
+      "get crypto",
+      "my address",
+      "wallet address",
+      "deposit address",
+    ],
+    flow: "RECEIVE",
+  },
+  // SWAP triggers
+  {
+    keywords: ["swap", "convert", "exchange", "change btc", "change eth"],
+    flow: "SWAP",
+  },
+  // BALANCE triggers
+  {
+    keywords: [
+      "balance",
+      "how much",
+      "check wallet",
+      "what do i have",
+      "check my balance",
+      "see my balance",
+    ],
+    flow: "BALANCE",
   },
 ];
 
-/**
- * Returns { flow, matched: true } if a keyword matches,
- * or { flow: null, matched: false } if nothing matches.
- */
 export function matchKeywordIntent(text) {
   if (!text) return { flow: null, matched: false };
   const lower = text.toLowerCase().trim();
