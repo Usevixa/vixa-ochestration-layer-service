@@ -1,4 +1,5 @@
 import OpenAI from "openai";
+import { matchKeywordIntent } from "../utils/intentKeywords.js";
 
 /**
  * Translates a technical error into a user-friendly WhatsApp message.
@@ -12,6 +13,19 @@ const openai = new OpenAI({
 });
 
 export async function analyzeUserIntent(message, sessionData) {
+  // Fast keyword pre-screen — no AI call needed
+  const { flow, matched } = matchKeywordIntent(message);
+
+  if (matched) {
+    if (flow === "CANCEL") {
+      return { intent: "CANCEL_FLOW", detectedFlow: null, replyMessage: null };
+    }
+    return {
+      intent: "START_SPECIFIC_FLOW",
+      detectedFlow: flow,
+      replyMessage: null,
+    };
+  }
   // Determine what the system is currently expecting from the user
   let currentContext = "No active flow. User is at the main menu.";
 
