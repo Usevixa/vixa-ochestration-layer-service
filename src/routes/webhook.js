@@ -3748,7 +3748,7 @@ async function handleAuthenticationGate({ from, phone_number_id, msgText }) {
       "❌ Incorrect PIN or login failed. Please try again.",
       phone_number_id,
     );
-
+    await triggerPinFlow(from, phone_number_id, "LOGIN");
     return { status: "WRONG_PIN" };
   }
 }
