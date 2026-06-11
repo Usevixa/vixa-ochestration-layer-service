@@ -24,28 +24,31 @@ export async function loginUser({ phoneNumber, pin, deviceId = "" }) {
     });
 
     const token = res.data?.data?.accessToken || res.data?.accessToken;
-    const expiresIn = res.data?.data?.accessTokenExpiresIn || 3600; // fallback 1 hour
+    const expiresAtRaw = res.data?.data?.accessTokenExpiresAt;
+    tokenExpiresAt = expiresAtRaw
+      ? new Date(expiresAtRaw).getTime()
+      : Date.now() + 3600 * 1000;
 
-    const isFullyOnboarded =
-      res.data?.data?.isFullyOnboarded ?? res.data?.isFullyOnboarded ?? null;
-    const onboardingStage =
-      res.data?.data?.onboardingStage ?? res.data?.onboardingStage ?? null;
+    const refreshToken = res.data?.data?.refreshToken;
+    const refreshTokenExpiresAtRaw = res.data?.data?.refreshTokenExpiresAt;
+    const refreshTokenExpiresAt = refreshTokenExpiresAtRaw
+      ? new Date(refreshTokenExpiresAtRaw).getTime()
+      : null;
 
-    if (!token) {
-      throw new Error("No access token returned from auth service");
-    }
+    const isFullyOnboarded = res.data?.data?.isFullyOnboarded ?? null;
+    const onboardingStage = res.data?.data?.onboardingStage ?? null;
 
-    // 1. CRITICAL: Cache globally so fetchAuthMe works immediately
     cachedToken = token;
-    tokenExpiresAt = Date.now() + (expiresIn - 300) * 1000;
 
-    // 2. Only update token-related session data here.
-    // 🛑 DO NOT set authenticated: true or awaitingPin: false here!
     await updateSession(phoneNumber, {
       data: {
         token,
         pin,
         tokenExpiresAt,
+        refreshToken,
+        refreshTokenExpiresAt,
+        isFullyOnboarded,
+        onboardingStage,
       },
     });
 
@@ -82,6 +85,48 @@ export async function verifyUserToken() {
     headers: { Authorization: `Bearer ${cachedToken}` },
   });
   return res.data;
+}
+
+export async function refreshAccessToken({ phoneNumber, refreshToken }) {
+  try {
+    const res = await axios.post(`${VIXA_API_BASE}/auth/refresh`, {
+      refreshToken,
+      deviceId: "",
+    });
+
+    const data = res.data?.data;
+    if (!data?.accessToken)
+      throw new Error("No access token in refresh response");
+
+    const newTokenExpiresAt = data.accessTokenExpiresAt
+      ? new Date(data.accessTokenExpiresAt).getTime()
+      : Date.now() + 3600 * 1000;
+
+    const newRefreshTokenExpiresAt = data.refreshTokenExpiresAt
+      ? new Date(data.refreshTokenExpiresAt).getTime()
+      : null;
+
+    cachedToken = data.accessToken;
+    tokenExpiresAt = newTokenExpiresAt;
+
+    await updateSession(phoneNumber, {
+      data: {
+        token: data.accessToken,
+        tokenExpiresAt: newTokenExpiresAt,
+        refreshToken: data.refreshToken,
+        refreshTokenExpiresAt: newRefreshTokenExpiresAt,
+      },
+    });
+
+    console.log("Token refreshed silently for", phoneNumber);
+    return { success: true };
+  } catch (err) {
+    console.error(
+      "refreshAccessToken failed:",
+      err?.response?.data || err.message,
+    );
+    return { success: false };
+  }
 }
 
 export function getToken() {
