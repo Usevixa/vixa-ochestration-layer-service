@@ -10,13 +10,14 @@ import {
   loginUser,
   checkPhoneNumber,
   restoreCachedToken,
+  refreshAccessToken,
+  isSessionTokenValid,
 } from "../services/auth.service.js";
 import { fetchAuthMe } from "../services/user.service.js";
 import { depositCrypto } from "../services/deposit.service.js";
 import { fetchWalletBalances } from "../services/wallet.service.js";
 import { fetchReceiveWallets } from "../services/recieve.service.js";
 import { analyzeUserIntent, humanizeError } from "../services/ai.service.js";
-import { isSessionTokenValid } from "../services/auth.service.js";
 import {
   fetchSwapCurrencies,
   fetchSwapQuote,
@@ -195,38 +196,72 @@ router.post("/callback", async (req, res) => {
             session.data?.authenticated &&
             !isSessionTokenValid(session.data)
           ) {
-            // Only trigger if they aren't ALREADY trying to enter their PIN
             if (!session.data?.awaitingPin) {
-              console.log(`Session expired for ${from}. Requesting re-auth.`);
+              console.log(
+                `Token expired for ${from}. Attempting silent refresh...`,
+              );
 
-              // We safely log them out and wipe any pending financial transactions
-              // to prevent them from executing a stale transaction after re-logging in.
-              await updateSession(from, {
-                data: {
-                  ...session.data,
-                  authenticated: false,
-                  awaitingPin: true,
-                  pinAttempts: 0,
-                  // Clear pending states
-                  pendingDeposit: false,
-                  awaitingDepositConfirmation: false,
-                  awaitingDepositPin: false,
-                  swap: null,
-                  send: null,
-                  withdraw: null,
-                  receive: null,
-                },
-              });
+              const refreshTokenStillValid = session.data?.refreshTokenExpiresAt
+                ? Date.now() < session.data.refreshTokenExpiresAt
+                : !!session.data?.refreshToken;
 
-              // await sendWhatsApp(
-              //   from,
-              //   "⏳ Your session has expired for your security.\n\nPlease enter your *4-digit PIN* to securely log back in.",
-              //   phone_number_id,
-              // );
+              if (session.data?.refreshToken && refreshTokenStillValid) {
+                const refreshResult = await refreshAccessToken({
+                  phoneNumber: from,
+                  refreshToken: session.data.refreshToken,
+                });
 
-              await triggerPinFlow(from, phone_number_id, "LOGIN");
-
-              continue; // Stop processing this message. Force them to log in.
+                if (refreshResult.success) {
+                  console.log(
+                    `Silent refresh succeeded for ${from}. Continuing.`,
+                  );
+                  session = await getSession(from);
+                  restoreCachedToken(session.data);
+                  // fall through to normal message processing
+                } else {
+                  console.log(
+                    `Silent refresh failed for ${from}. Requesting PIN.`,
+                  );
+                  await updateSession(from, {
+                    data: {
+                      ...session.data,
+                      authenticated: false,
+                      awaitingPin: true,
+                      pinAttempts: 0,
+                      pendingDeposit: false,
+                      awaitingDepositConfirmation: false,
+                      awaitingDepositPin: false,
+                      swap: null,
+                      send: null,
+                      withdraw: null,
+                      receive: null,
+                    },
+                  });
+                  await triggerPinFlow(from, phone_number_id, "LOGIN");
+                  continue;
+                }
+              } else {
+                console.log(
+                  `No valid refresh token for ${from}. Requesting PIN.`,
+                );
+                await updateSession(from, {
+                  data: {
+                    ...session.data,
+                    authenticated: false,
+                    awaitingPin: true,
+                    pinAttempts: 0,
+                    pendingDeposit: false,
+                    awaitingDepositConfirmation: false,
+                    awaitingDepositPin: false,
+                    swap: null,
+                    send: null,
+                    withdraw: null,
+                    receive: null,
+                  },
+                });
+                await triggerPinFlow(from, phone_number_id, "LOGIN");
+                continue;
+              }
             }
           }
 
