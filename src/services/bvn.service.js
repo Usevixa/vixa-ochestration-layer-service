@@ -3,6 +3,9 @@ import axios from "axios";
 import { getToken } from "./auth.service.js";
 import https from "https";
 
+const VIXA_API_BASE =
+  process.env.VIXA_API_BASE || "https://api.usevixa.com/api/v1";
+
 const httpsAgent = new https.Agent({
   keepAlive: true,
   timeout: 30000, // socket timeout
@@ -27,7 +30,7 @@ export async function verifyBVN({ bvn, firstName, lastName }) {
     });
 
     const res = await axios.post(
-      "https://api.usevixa.com/api/v1/kyc/verify-bvn",
+      `${VIXA_API_BASE}/kyc/verify-bvn`,
       payload,
       {
         httpsAgent,

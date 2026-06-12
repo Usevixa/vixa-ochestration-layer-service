@@ -43,7 +43,7 @@ export async function createUserOnboarding({
 
 export async function notifyOnboardingStageStarted(phoneNumber, phoneNumberId) {
   try {
-    await fetch("https://api.usevixa.com/api/v1/onboarding/stage/started", {
+    await fetch(`${VIXA_API_BASE}/onboarding/stage/started`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ phoneNumber, phoneNumberId }),
