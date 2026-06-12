@@ -8,6 +8,8 @@ const httpsAgent = new https.Agent({
   timeout: 30000, // socket timeout
 });
 
+const VIXA_API_BASE = process.env.VIXA_API_BASE || "https://api.usevixa.com/api/v1";
+
 export async function verifyNIN({ nin, firstName, lastName, dateOfBirth }) {
   try {
     const payload = {
@@ -28,7 +30,7 @@ export async function verifyNIN({ nin, firstName, lastName, dateOfBirth }) {
     });
 
     const res = await axios.post(
-      "https://api.usevixa.com/api/v1/kyc/verify-nin",
+      `${VIXA_API_BASE}/kyc/verify-nin`,
       payload,
       {
         httpsAgent,
