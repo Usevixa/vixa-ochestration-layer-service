@@ -8,6 +8,9 @@ const httpsAgent = new https.Agent({
     timeout: 30000, // socket timeout
 });
 
+const VIXA_API_BASE =
+  process.env.VIXA_API_BASE || "https://api.usevixa.com/api/v1";
+
 export async function confirmPayment({ 
     id
 
@@ -20,7 +23,7 @@ export async function confirmPayment({
         }
 
         const res = await axios.post(
-            `https://api.usevixa.com/api/v1/payment/crypto/deposits${id}/confirm`,
+            `${VIXA_API_BASE}/payment/crypto/deposits${id}/confirm`,
             {
                 httpsAgent,
                 timeout: 750000, // request timeout

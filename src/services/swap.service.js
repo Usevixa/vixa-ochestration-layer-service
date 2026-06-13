@@ -8,7 +8,8 @@ const httpsAgent = new https.Agent({
   timeout: 30000,
 });
 
-const BASE_URL = "https://api.usevixa.com/api/v1";
+const VIXA_API_BASE =
+  process.env.VIXA_API_BASE || "https://api.usevixa.com/api/v1";
 
 /**
  * Fetch available currencies for swapping
@@ -19,7 +20,7 @@ export async function fetchSwapCurrencies() {
     const token = await getToken(); // Ensure we await if getToken is async, though your example implies sync.
     if (!token) throw new Error("Missing auth token");
 
-    const res = await axios.get(`${BASE_URL}/swap/currencies`, {
+    const res = await axios.get(`${VIXA_API_BASE}/swap/currencies`, {
       httpsAgent,
       headers: { Authorization: `Bearer ${token}` },
     });
@@ -42,7 +43,7 @@ export async function fetchSwapQuote({ fromCoin, toCoin, fromAmount }) {
     const token = await getToken();
     if (!token) throw new Error("Missing auth token");
 
-    const res = await axios.get(`${BASE_URL}/swap/quote`, {
+    const res = await axios.get(`${VIXA_API_BASE}/swap/quote`, {
       httpsAgent,
       params: { fromCoin, toCoin, fromAmount },
       headers: { Authorization: `Bearer ${token}` },
@@ -65,7 +66,7 @@ export async function executeSwap({ fromCoin, fromAmount, toCoin, pin }) {
     if (!token) throw new Error("Missing auth token");
 
     const res = await axios.post(
-      `${BASE_URL}/swap`,
+      `${VIXA_API_BASE}/swap`,
       { fromCoin, fromAmount, toCoin, pin },
       {
         httpsAgent,

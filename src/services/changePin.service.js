@@ -2,7 +2,9 @@ import axios from "axios";
 import { getToken } from "./auth.service.js";
 import https from "https";
 
-const BASE_URL = "https://api.usevixa.com/api/v1";
+const VIXA_API_BASE =
+  process.env.VIXA_API_BASE || "https://api.usevixa.com/api/v1";
+
 
 const httpsAgent = new https.Agent({
   keepAlive: true,
@@ -13,7 +15,7 @@ export async function requestChangePinOtp(purpose = "ChangePIN") {
   try {
     const token = await getToken();
     const res = await axios.post(
-      `${BASE_URL}/account/request-otp`,
+      `${VIXA_API_BASE}/account/request-otp`,
       { purpose },  // ✅ now dynamic
       {
         httpsAgent,
@@ -31,7 +33,7 @@ export async function changePinRequest({ currentPin, newPin, confirmPin, otpCode
   try {
     const token = await getToken();
     const res = await axios.post(
-      `${BASE_URL}/account/change-pin`,
+      `${VIXA_API_BASE}/account/change-pin`,
       { currentPin, newPin, confirmPin, otpCode },
       {
         httpsAgent,
@@ -50,7 +52,7 @@ export async function lockWallet({ pin, reason }) {
   try {
     const token = await getToken();
     const res = await axios.post(
-      `${BASE_URL}/account/wallet/lock`,
+      `${VIXA_API_BASE}/account/wallet/lock`,
       { pin, reason },
       {
         httpsAgent,
@@ -68,7 +70,7 @@ export async function unlockWallet({ pin, otpCode }) {
   try {
     const token = await getToken();
     const res = await axios.post(
-      `${BASE_URL}/account/wallet/unlock`,
+      `${VIXA_API_BASE}/account/wallet/unlock`,
       { pin, otpCode },
       {
         httpsAgent,

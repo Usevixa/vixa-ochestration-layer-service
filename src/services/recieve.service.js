@@ -8,7 +8,8 @@ const httpsAgent = new https.Agent({
   timeout: 30000,
 });
 
-const BASE_URL = "https://api.usevixa.com/api/v1";
+const VIXA_API_BASE =
+  process.env.VIXA_API_BASE || "https://api.usevixa.com/api/v1";
 
 /**
  * Fetch crypto receive wallet addresses
@@ -20,7 +21,7 @@ export async function fetchReceiveWallets({ coin, chain, pageNo = 1, pageLimit =
     if (!token) throw new Error("Missing auth token");
 
     const res = await axios.get(
-      `${BASE_URL}/wallet/crypto/subwallets/addresses`,
+      `${VIXA_API_BASE}/wallet/crypto/subwallets/addresses`,
       {
         httpsAgent,
         params: {
