@@ -7,7 +7,8 @@ const httpsAgent = new https.Agent({
   timeout: 30000,
 });
 
-const BASE_URL = "https://api.usevixa.com/api/v1";
+const VIXA_API_BASE =
+  process.env.VIXA_API_BASE || "https://api.usevixa.com/api/v1";
 
 /**
  * Fetch supported send currencies
@@ -18,7 +19,7 @@ export async function fetchSendSupportedCurrencies({ coin, chain } = {}) {
     const token = await getToken();
     if (!token) throw new Error("Missing auth token");
 
-    const res = await axios.get(`${BASE_URL}/crypto/supported-currencies`, {
+    const res = await axios.get(`${VIXA_API_BASE}/crypto/supported-currencies`, {
       httpsAgent,
       params: { coin, chain },
       headers: { Authorization: `Bearer ${token}` },
@@ -78,7 +79,7 @@ export async function executeSendCrypto({
 
     console.log("🚀 EXECUTING SEND WITH PAYLOAD:", JSON.stringify(payload, null, 2));
 
-    const res = await axios.post(`${BASE_URL}/crypto/send`, payload, {
+    const res = await axios.post(`${VIXA_API_BASE}/crypto/send`, payload, {
       httpsAgent,
       headers: { Authorization: `Bearer ${token}` },
     });

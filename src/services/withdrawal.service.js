@@ -8,13 +8,15 @@ const httpsAgent = new https.Agent({
   timeout: 30000,
 });
 
-const BASE_URL = "https://api.usevixa.com/api/v1";
+const VIXA_API_BASE =
+  process.env.VIXA_API_BASE || "https://api.usevixa.com/api/v1";
+
 
 export async function fetchWithdrawalQuote(payload) {
   try {
     const token = await getToken();
     console.log("qoute payload ==>", payload)
-    const res = await axios.post(`${BASE_URL}/withdrawal/quote`, payload, {
+    const res = await axios.post(`${VIXA_API_BASE}/withdrawal/quote`, payload, {
       httpsAgent,
       headers: { Authorization: `Bearer ${token}` },
     });
@@ -28,7 +30,7 @@ export async function fetchWithdrawalQuote(payload) {
 export async function fetchBanks(countryCode, channelId) { 
   try {
     const token = await getToken();
-    const res = await axios.get(`${BASE_URL}/payment/networks?CountryId=${countryCode}&ChannelId=${channelId}`, {
+    const res = await axios.get(`${VIXA_API_BASE}/payment/networks?CountryId=${countryCode}&ChannelId=${channelId}`, {
       httpsAgent,
       headers: { Authorization: `Bearer ${token}` },
     });
@@ -44,7 +46,7 @@ export async function fetchBanks(countryCode, channelId) {
 export async function validateBankAccount(payload) {
   try {
     const token = await getToken();
-    const res = await axios.post(`${BASE_URL}/payment/validate-bank-account`, payload, {
+    const res = await axios.post(`${VIXA_API_BASE}/payment/validate-bank-account`, payload, {
       httpsAgent,
       headers: { Authorization: `Bearer ${token}` },
     });
@@ -60,7 +62,7 @@ export async function executeWithdrawal(payload) {
     const token = await getToken();
 
     console.log(payload,'execute payload')
-    const res = await axios.post(`${BASE_URL}/withdrawal/execute`, payload, {
+    const res = await axios.post(`${VIXA_API_BASE}/withdrawal/execute`, payload, {
       httpsAgent,
       headers: { Authorization: `Bearer ${token}` },
     });
@@ -74,7 +76,7 @@ export async function executeWithdrawal(payload) {
 export async function fetchSupportedCountries(region = "africa") {
   try {
     const token = await getToken();
-    const res = await axios.get(`${BASE_URL}/payment/supported-countries?Region=${region}`, {
+    const res = await axios.get(`${VIXA_API_BASE}/payment/supported-countries?Region=${region}`, {
       httpsAgent,
       headers: { Authorization: `Bearer ${token}` },
     });
@@ -89,7 +91,7 @@ export async function fetchSupportedCountries(region = "africa") {
 export async function fetchPaymentChannels(countryCode, ramp) {
   try {
     const token = await getToken();
-    const res = await axios.get(`${BASE_URL}/payment/channels?ramp=${ramp}&country=${countryCode}`, {
+    const res = await axios.get(`${VIXA_API_BASE}/payment/channels?ramp=${ramp}&country=${countryCode}`, {
       httpsAgent,
       headers: { Authorization: `Bearer ${token}` },
     });
