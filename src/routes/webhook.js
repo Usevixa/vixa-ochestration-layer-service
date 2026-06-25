@@ -55,7 +55,7 @@ const router = express.Router();
 const WHATSAPP_TOKEN =
   "EAAj9wlKZBT6ABR0ZA7xB1T7Y4ZCi81c6ZCfu0v9KKngj3rixlkkq2JLtZCIYCprLk0nnJ1tsq02sRSbSZAzZBWVEPF7ueXzZAALOKTnNB6VqOr1TAp3sKvxq14FLRSlG2kaKQpM1poznqrOnxn3blZCq7bBZBOivfN0bLXFRwnGBZBHRcOf2ltnG8oBCbNN4vjQAh8MkcGZC2ZBRLVrp2OwKJ4BBCbGDrdAf6NvNMz5DJMr4WZAfX3ZC892ZAbFr9hZCMTaSmJvCDpn1kGWBkdfwQpZCXa3ZBxM0gZDZD";
 const VERIFY_TOKEN = process.env.WHATSAPP_VERIFY_TOKEN;
-const FLOW_ID = "1059704779958649";
+const FLOW_ID = "1554499149728842";
 const PIN_FLOW_ID = "1571906007827358";
 const NIN_FLOW_ID = "1520332329637155";
 const BVN_FLOW_ID = "1638175827290848";
@@ -4952,6 +4952,8 @@ async function triggerFlow(toPhone, phone_number_id) {
     },
     body: JSON.stringify(body),
   });
+
+  console.log(res,'send message res')
 
   if (!res.ok) {
     const debug = await res.text();
