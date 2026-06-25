@@ -45,6 +45,7 @@ import {
   lockWallet,
   unlockWallet,
 } from "../services/changePin.service.js";
+import logger from "../lib/logger.js";
 
 import { decryptRequest, encryptResponse } from "../utils/decrypt.js";
 
@@ -52,9 +53,9 @@ const router = express.Router();
 
 // Environment configuration (Replace with environment variables in production)
 const WHATSAPP_TOKEN =
-  "EAAYMlHAusnwBRDx6KHY8bAZBkuqMP773wYlbnkLnsKOXxxHXNs9qc9DORyAYVxdQkJrr0zprJ3aX37K1HhFal619ntMwbUOZBU3iXSvxVWP4P0RdgJQkbrgPph6TR5e5Dl4utr4gJsUy8xODgCRAEAmllx7iubbCKo0qFJq12xvMO5IZAtJIO4e3ejZCsQZDZD";
+  "EAAj9wlKZBT6ABR0ZA7xB1T7Y4ZCi81c6ZCfu0v9KKngj3rixlkkq2JLtZCIYCprLk0nnJ1tsq02sRSbSZAzZBWVEPF7ueXzZAALOKTnNB6VqOr1TAp3sKvxq14FLRSlG2kaKQpM1poznqrOnxn3blZCq7bBZBOivfN0bLXFRwnGBZBHRcOf2ltnG8oBCbNN4vjQAh8MkcGZC2ZBRLVrp2OwKJ4BBCbGDrdAf6NvNMz5DJMr4WZAfX3ZC892ZAbFr9hZCMTaSmJvCDpn1kGWBkdfwQpZCXa3ZBxM0gZDZD";
 const VERIFY_TOKEN = process.env.WHATSAPP_VERIFY_TOKEN;
-const FLOW_ID = "1462140848896803";
+const FLOW_ID = "1059704779958649";
 const PIN_FLOW_ID = "1571906007827358";
 const NIN_FLOW_ID = "1520332329637155";
 const BVN_FLOW_ID = "1638175827290848";
@@ -146,6 +147,7 @@ router.get("/callback", (req, res) => {
 /* ------------- main webhook for incoming WhatsApp events (FIXED FOR FLOW SUBMISSION) ------------- */
 router.post("/callback", async (req, res) => {
   console.log("webhook hit successfully");
+  logger.info('Webhook hit');
   // Acknowledge immediately to Meta
   res.sendStatus(200);
 
@@ -162,6 +164,7 @@ router.post("/callback", async (req, res) => {
         // Ignore status updates
         if (value.statuses?.length > 0) {
           console.log("Status update received — ignoring");
+          logger.debug('Status update received, ignoring');
           continue;
         }
 
