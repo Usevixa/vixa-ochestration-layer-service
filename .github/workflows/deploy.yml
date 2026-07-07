@@ -3,7 +3,7 @@ name: Build & Deploy Orchestration
 on:
   push:
     branches:
-       - test
+       - main
       #- dev
 
 env:
