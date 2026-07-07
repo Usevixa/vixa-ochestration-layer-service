@@ -52,14 +52,21 @@ import { decryptRequest, encryptResponse } from "../utils/decrypt.js";
 const router = express.Router();
 
 // Environment configuration (Replace with environment variables in production)
-const WHATSAPP_TOKEN =
-  "EAAj9wlKZBT6ABR0ZA7xB1T7Y4ZCi81c6ZCfu0v9KKngj3rixlkkq2JLtZCIYCprLk0nnJ1tsq02sRSbSZAzZBWVEPF7ueXzZAALOKTnNB6VqOr1TAp3sKvxq14FLRSlG2kaKQpM1poznqrOnxn3blZCq7bBZBOivfN0bLXFRwnGBZBHRcOf2ltnG8oBCbNN4vjQAh8MkcGZC2ZBRLVrp2OwKJ4BBCbGDrdAf6NvNMz5DJMr4WZAfX3ZC892ZAbFr9hZCMTaSmJvCDpn1kGWBkdfwQpZCXa3ZBxM0gZDZD";
+// const WHATSAPP_TOKEN =
+//   "EAAj9wlKZBT6ABR0ZA7xB1T7Y4ZCi81c6ZCfu0v9KKngj3rixlkkq2JLtZCIYCprLk0nnJ1tsq02sRSbSZAzZBWVEPF7ueXzZAALOKTnNB6VqOr1TAp3sKvxq14FLRSlG2kaKQpM1poznqrOnxn3blZCq7bBZBOivfN0bLXFRwnGBZBHRcOf2ltnG8oBCbNN4vjQAh8MkcGZC2ZBRLVrp2OwKJ4BBCbGDrdAf6NvNMz5DJMr4WZAfX3ZC892ZAbFr9hZCMTaSmJvCDpn1kGWBkdfwQpZCXa3ZBxM0gZDZD";
+const WHATSAPP_TOKEN = process.env.WHATSAPP_TOKEN;
 const VERIFY_TOKEN = process.env.WHATSAPP_VERIFY_TOKEN;
-const FLOW_ID = "1554499149728842";
-const PIN_FLOW_ID = "1571906007827358";
-const NIN_FLOW_ID = "1520332329637155";
-const BVN_FLOW_ID = "1638175827290848";
+// const FLOW_ID = "1554499149728842";
+// const PIN_FLOW_ID = "1571906007827358";
+// const NIN_FLOW_ID = "1520332329637155";
+// const BVN_FLOW_ID = "1638175827290848";
 const WHATSAPP_API_VERSION = "v25.0";
+
+const FLOW_ID = process.env.FLOW_ID;
+const PIN_FLOW_ID = process.env.PIN_FLOW_ID;
+const NIN_FLOW_ID = process.env.NIN_FLOW_ID;
+const BVN_FLOW_ID = process.env.BVN_FLOW_ID;
+const BANK_SELECTION_FLOW_ID = process.env.BANK_SELECTION_FLOW_ID;
 
 function formatDobToISO(dob) {
   if (!dob) return null;
@@ -147,7 +154,7 @@ router.get("/callback", (req, res) => {
 /* ------------- main webhook for incoming WhatsApp events (FIXED FOR FLOW SUBMISSION) ------------- */
 router.post("/callback", async (req, res) => {
   console.log("webhook hit successfully");
-  logger.info('Webhook hit');
+  logger.info("Webhook hit");
   // Acknowledge immediately to Meta
   res.sendStatus(200);
 
@@ -164,7 +171,7 @@ router.post("/callback", async (req, res) => {
         // Ignore status updates
         if (value.statuses?.length > 0) {
           console.log("Status update received — ignoring");
-          logger.debug('Status update received, ignoring');
+          logger.debug("Status update received, ignoring");
           continue;
         }
 
@@ -1678,7 +1685,8 @@ router.post("/callback", async (req, res) => {
 
             // if (actionId === "QUOTE_CONFIRM_YES") {
             //   const countryCode = session.data.withdraw?.countryCode || "ng";
-            //   const banksRes = await fetchBanks(countryCode);
+            //   const channelId = session.data.withdraw?.channelId;
+            //   const banksRes = await fetchBanks(countryCode, channelId);
             //   if (!banksRes.success || !banksRes.data.length) {
             //     await sendWhatsApp(
             //       from,
@@ -1688,39 +1696,21 @@ router.post("/callback", async (req, res) => {
             //     return;
             //   }
 
-            //   // WhatsApp limits lists to 10 items. We slice the top 10 here.
-            //   const topBanks = banksRes.data.slice(5, 15);
-            //   const rows = topBanks.map((b) => ({
-            //     id: `WITHDRAW_BANK_${b.id}`,
-            //     title: b.name.substring(0, 24), // WhatsApp title limit is 24 chars
-            //   }));
+            //   const allBanks = banksRes.data;
 
             //   await updateSession(from, {
             //     data: {
             //       ...session.data,
             //       withdraw: {
             //         ...session.data.withdraw,
-            //         banks: topBanks,
+            //         banks: allBanks, // full list saved to session
+            //         currentBankPage: 0, // start on page 0
             //         step: "SELECT_BANK",
             //       },
             //     },
             //   });
 
-            //   await sendWhatsApp(
-            //     from,
-            //     {
-            //       type: "interactive",
-            //       interactive: {
-            //         type: "list",
-            //         body: { text: "🏦 Select your destination bank:" },
-            //         action: {
-            //           button: "Select Bank",
-            //           sections: [{ title: "Available Banks", rows }],
-            //         },
-            //       },
-            //     },
-            //     phone_number_id,
-            //   );
+            //   await sendPaginatedBanksMenu(from, phone_number_id, allBanks, 0);
             //   return;
             // }
 
@@ -1744,14 +1734,13 @@ router.post("/callback", async (req, res) => {
                   ...session.data,
                   withdraw: {
                     ...session.data.withdraw,
-                    banks: allBanks, // full list saved to session
-                    currentBankPage: 0, // start on page 0
+                    banks: allBanks,
                     step: "SELECT_BANK",
                   },
                 },
               });
 
-              await sendPaginatedBanksMenu(from, phone_number_id, allBanks, 0);
+              await triggerBankSelectionFlow(from, phone_number_id, allBanks);
               return;
             }
 
@@ -3308,6 +3297,45 @@ async function processFlowCompletion(phone, phone_number_id, form) {
     return;
   }
 
+  if (flowToken.includes("::BANK_SELECT")) {
+    const bankId = form.selected_bank_id;
+    const bankSession = await getSession(phone);
+
+    const bankName =
+      bankSession.data.withdraw.banks.find((b) => b.id === bankId)?.name ||
+      "Selected Bank";
+    const isNigeria = bankSession.data.withdraw?.countryCode === "NG";
+
+    await updateSession(phone, {
+      data: {
+        ...bankSession.data,
+        withdraw: {
+          ...bankSession.data.withdraw,
+          networkId: bankId,
+          bankName: bankName,
+          step: isNigeria
+            ? "ENTER_ACCOUNT_NUMBER"
+            : "ENTER_ACCOUNT_NUMBER_OTHER",
+        },
+      },
+    });
+
+    if (isNigeria) {
+      await sendWhatsApp(
+        phone,
+        `🏦 You selected *${bankName}*.\n\nPlease enter your 10-digit Account Number:`,
+        phone_number_id,
+      );
+    } else {
+      await sendWhatsApp(
+        phone,
+        `🏦 You selected *${bankName}*.\n\nPlease enter your *Account Number*:`,
+        phone_number_id,
+      );
+    }
+    return;
+  }
+
   const firstName = form.screen_0_First_Name_0 || form.First_Name_4f74a5;
   const lastName = form.screen_0_Last_Name_1 || form.Last_Name_76477c;
   const email = form.screen_0_Email_2;
@@ -3660,12 +3688,31 @@ router.post("/flow/callback", async (req, res) => {
       };
     }
     // --- B. DATA EXCHANGE LOGIC (For future real-time validation) ---
+    // else if (action === "data_exchange") {
+    //   console.log("Data exchange request received. Returning failure screen.");
+    //   responsePayload = {
+    //     screen: "FAILURE",
+    //     data: { message: "Data Exchange not implemented." },
+    //   };
+    // }
     else if (action === "data_exchange") {
-      console.log("Data exchange request received. Returning failure screen.");
-      responsePayload = {
-        screen: "FAILURE",
-        data: { message: "Data Exchange not implemented." },
-      };
+      const screen = decryptedBody.screen;
+      const data = decryptedBody.data;
+
+      if (screen === "SELECT_BANK") {
+        // Echo the banks back — they were passed in via flow_action_payload
+        responsePayload = {
+          screen: "SELECT_BANK",
+          data: {
+            banks: data.banks || [],
+          },
+        };
+      } else {
+        responsePayload = {
+          screen: "FAILURE",
+          data: { message: "Data Exchange not implemented." },
+        };
+      }
     }
 
     // 2. ENCRYPT THE RESPONSE
@@ -4953,7 +5000,7 @@ async function triggerFlow(toPhone, phone_number_id) {
     body: JSON.stringify(body),
   });
 
-  console.log(res,'send message res')
+  console.log(res, "send message res");
 
   if (!res.ok) {
     const debug = await res.text();
@@ -5087,6 +5134,54 @@ async function triggerBVNFlow(toPhone, phone_number_id) {
     console.error("triggerBVNFlow failed:", res.status, debug);
   }
   console.log("triggerBVNFlow sent to", toPhone);
+}
+
+async function triggerBankSelectionFlow(toPhone, phone_number_id, banks) {
+  const url = `https://graph.facebook.com/${WHATSAPP_API_VERSION}/${phone_number_id}/messages`;
+
+  const bankOptions = banks.map((b) => ({
+    id: b.id,
+    title: b.name.substring(0, 30),
+  }));
+
+  const body = {
+    messaging_product: "whatsapp",
+    to: toPhone,
+    type: "interactive",
+    interactive: {
+      type: "flow",
+      body: { text: "🏦 Please select your destination bank" },
+      action: {
+        name: "flow",
+        parameters: {
+          flow_id: BANK_SELECTION_FLOW_ID,
+          flow_token: `${toPhone}::BANK_SELECT`,
+          flow_cta: "Select Bank",
+          flow_message_version: "3",
+          flow_action: "data_exchange",
+          flow_action_payload: {
+            screen: "SELECT_BANK",
+            data: { banks: bankOptions },
+          },
+        },
+      },
+    },
+  };
+
+  const res = await fetch(url, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${WHATSAPP_TOKEN}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(body),
+  });
+
+  if (!res.ok) {
+    const debug = await res.text();
+    console.error("triggerBankSelectionFlow failed:", res.status, debug);
+  }
+  console.log("triggerBankSelectionFlow sent to", toPhone);
 }
 
 /* ------------- WA send helper (text + interactive) ------------- */
