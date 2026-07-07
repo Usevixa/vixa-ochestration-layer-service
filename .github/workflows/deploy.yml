@@ -3,7 +3,8 @@ name: Build & Deploy Orchestration
 on:
   push:
     branches:
-      - dev
+       - test
+      #- dev
 
 env:
   REGISTRY: ghcr.io
