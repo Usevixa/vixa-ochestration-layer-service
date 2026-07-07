@@ -14,7 +14,7 @@ const logger = winston.createLogger({
     new winston.transports.Console(),
     new SeqTransport({
       serverUrl: process.env.SEQ_SERVER_URL || 'http://10.106.0.3:5341',
-      apiKey: process.env.SEQ_API_KEY, // undefined today (anonymous ingestion)
+      apiKey: process.env.SEQ_API_KEY,
       onError: (e) => { console.error('Seq logging error:', e); },
       handleExceptions: true,
       handleRejections: true
