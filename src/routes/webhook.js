@@ -4132,6 +4132,10 @@ async function handlePinFlowSubmission({
           "get a withdrawal quote",
         );
         await sendWhatsApp(phone, friendly, phone_number_id);
+        await updateSession(phone, {
+          data: { ...session.data, withdraw: null },
+        });
+        await sendMainMenu(phone, phone_number_id);
         return;
       }
 
