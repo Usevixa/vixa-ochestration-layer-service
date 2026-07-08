@@ -5162,7 +5162,7 @@ async function triggerBankSelectionFlow(toPhone, phone_number_id, banks) {
           flow_token: `${toPhone}::BANK_SELECT`,
           flow_cta: "Select Bank",
           flow_message_version: "3",
-          flow_action: "data_exchange",
+          flow_action: "navigate",
           flow_action_payload: {
             screen: "SELECT_BANK",
             data: { banks: bankOptions },
