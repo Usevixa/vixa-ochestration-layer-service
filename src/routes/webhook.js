@@ -3363,9 +3363,10 @@ async function processFlowCompletion(phone, phone_number_id, form) {
     console.warn("Validation failed:", message);
     await sendWhatsApp(
       phone,
-      `❌ Onboarding failed: ${message}`,
+      `❌ Onboarding failed: ${message}\n\nTap below to fill the form again 👇`,
       phone_number_id,
     );
+    await triggerFlow(phone, phone_number_id);
     return;
   }
 
@@ -3385,9 +3386,10 @@ async function processFlowCompletion(phone, phone_number_id, form) {
     if (!createRes.success) {
       await sendWhatsApp(
         phone,
-        "❌ Could not create your account. Try again later.",
+        "❌ We couldn't create your account. Let's try that again 👇",
         phone_number_id,
       );
+        await triggerFlow(phone, phone_number_id);
       return;
     }
 
