@@ -4006,7 +4006,7 @@ async function handlePinFlowSubmission({
                   type: "reply",
                   reply: {
                     id: "CONFIRM_DEPOSIT_PAYMENT",
-                    title: "Confirm Payment",
+                    title: "Have Paid",
                   },
                 },
               ],
