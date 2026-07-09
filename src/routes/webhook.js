@@ -2736,6 +2736,31 @@ router.post("/callback", async (req, res) => {
             }
 
             // --- WITHDRAW FLOW LOGIC ---
+            // if (session.data?.withdraw?.step === "ENTER_AMOUNT") {
+            //   const amount = parseFloat(msg.text?.body?.trim());
+            //   if (isNaN(amount) || amount <= 0) {
+            //     await sendWhatsApp(
+            //       from,
+            //       "⚠️ Enter a valid amount.",
+            //       phone_number_id,
+            //     );
+            //     return;
+            //   }
+            //   await updateSession(from, {
+            //     data: {
+            //       ...session.data,
+            //       withdraw: {
+            //         ...session.data.withdraw,
+            //         amount,
+            //         step: "ENTER_QUOTE_PIN",
+            //       },
+            //     },
+            //   });
+            //   await triggerPinFlow(from, phone_number_id, "WITHDRAW_QUOTE");
+            //   return;
+            // }
+
+            // --- WITHDRAW FLOW LOGIC ---
             if (session.data?.withdraw?.step === "ENTER_AMOUNT") {
               const amount = parseFloat(msg.text?.body?.trim());
               if (isNaN(amount) || amount <= 0) {
@@ -2746,97 +2771,72 @@ router.post("/callback", async (req, res) => {
                 );
                 return;
               }
+
+              const { coin, channelId } = session.data.withdraw;
+
+              const quoteRes = await fetchWithdrawalQuote({
+                coin,
+                amount,
+                channelId,
+              });
+
+              if (!quoteRes.success) {
+                const rawError =
+                  quoteRes.error?.message || "Unknown server error";
+                const friendly = await humanizeError(
+                  rawError,
+                  "get a withdrawal quote",
+                );
+                await sendWhatsApp(from, friendly, phone_number_id);
+                await updateSession(from, {
+                  data: { ...session.data, withdraw: null },
+                });
+                await sendMainMenu(from, phone_number_id);
+                return;
+              }
+
+              const q = quoteRes.data;
+              const msgText = `📊 *Withdrawal Quote*\n\nWithdrawing: ${q.coinAmount} ${q.coin}\nEstimated ${q.fiatCurrency}: ${q.estimatedFiat} ${q.fiatCurrency}\nFees: ${q.totalFees}\n\nDo you want to proceed?`;
+
               await updateSession(from, {
                 data: {
                   ...session.data,
                   withdraw: {
                     ...session.data.withdraw,
                     amount,
-                    step: "ENTER_QUOTE_PIN",
+                    step: "AWAITING_QUOTE_CONFIRM",
                   },
                 },
               });
-              // await sendWhatsApp(
-              //   from,
-              //   "🔐 Enter your *4-digit PIN* to generate a quote:",
-              //   phone_number_id,
-              // );
-              await triggerPinFlow(from, phone_number_id, "WITHDRAW_QUOTE");
+
+              await sendWhatsApp(
+                from,
+                {
+                  type: "interactive",
+                  interactive: {
+                    type: "button",
+                    body: { text: msgText },
+                    action: {
+                      buttons: [
+                        {
+                          type: "reply",
+                          reply: {
+                            id: "QUOTE_CONFIRM_YES",
+                            title: "Yes, Proceed",
+                          },
+                        },
+                        {
+                          type: "reply",
+                          reply: { id: "WITHDRAW_CANCEL", title: "Cancel" },
+                        },
+                      ],
+                    },
+                  },
+                },
+                phone_number_id,
+              );
               return;
             }
-
-            // if (session.data?.withdraw?.step === "ENTER_QUOTE_PIN") {
-            //   console.log(session, "qoute session");
-            //   const pin = msg.text?.body?.trim();
-            //   console.log(pin, pin?.length);
-            //   if (pin.length < 4) {
-            //     await sendWhatsApp(from, "⚠️ Invalid PIN.", phone_number_id);
-            //     return;
-            //   }
-
-            //   const { coin, amount, channelId } = session.data.withdraw;
-
-            //   const quoteRes = await fetchWithdrawalQuote({
-            //     coin,
-            //     amount,
-            //     channelId,
-            //     pin,
-            //   });
-
-            //   if (!quoteRes.success) {
-            //     const rawError =
-            //       quoteRes.error?.message || "Unknown server error";
-            //     const friendlyMessage = await humanizeError(
-            //       rawError,
-            //       "get a withdrawal quote",
-            //     );
-            //     await sendWhatsApp(from, friendlyMessage, phone_number_id);
-            //     return;
-            //   }
-
-            //   const q = quoteRes.data;
-            //   const msgText = `📊 *Withdrawal Quote*\n\nWithdrawing: ${q.coinAmount} ${q.coin}\nEstimated ${q.fiatCurrency}: ${q.estimatedFiat} ${q.fiatCurrency}\nFees: ${q.totalFees}\n\nDo you want to proceed?`;
-
-            //   await updateSession(from, {
-            //     data: {
-            //       ...session.data,
-            //       withdraw: {
-            //         ...session.data.withdraw,
-            //         channelId,
-            //         pin, // ← save PIN here so we can reuse it later
-            //         step: "AWAITING_QUOTE_CONFIRM",
-            //       },
-            //     },
-            //   });
-
-            //   await sendWhatsApp(
-            //     from,
-            //     {
-            //       type: "interactive",
-            //       interactive: {
-            //         type: "button",
-            //         body: { text: msgText },
-            //         action: {
-            //           buttons: [
-            //             {
-            //               type: "reply",
-            //               reply: {
-            //                 id: "QUOTE_CONFIRM_YES",
-            //                 title: "Yes, Proceed",
-            //               },
-            //             },
-            //             {
-            //               type: "reply",
-            //               reply: { id: "WITHDRAW_CANCEL", title: "Cancel" },
-            //             },
-            //           ],
-            //         },
-            //       },
-            //     },
-            //     phone_number_id,
-            //   );
-            //   return;
-            // }
 
             if (session.data?.withdraw?.step === "ENTER_ACCOUNT_NAME") {
               const accountName = msg.text?.body?.trim();
@@ -4122,7 +4122,6 @@ async function handlePinFlowSubmission({
         coin,
         amount,
         channelId,
-        pin,
       });
 
       if (!quoteRes.success) {
@@ -4147,7 +4146,6 @@ async function handlePinFlowSubmission({
           ...session.data,
           withdraw: {
             ...session.data.withdraw,
-            pin,
             step: "AWAITING_QUOTE_CONFIRM",
           },
         },
