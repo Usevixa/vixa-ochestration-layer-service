@@ -2031,6 +2031,17 @@ router.post("/callback", async (req, res) => {
                 return;
               }
 
+              const MIN_DEPOSIT_NGN = 500;
+              const MAX_DEPOSIT_NGN = 30_000_000;
+              if (amountNgn < MIN_DEPOSIT_NGN || amountNgn > MAX_DEPOSIT_NGN) {
+                await sendWhatsApp(
+                  from,
+                  `⚠️ Deposit must be between ₦${MIN_DEPOSIT_NGN.toLocaleString()} and ₦${MAX_DEPOSIT_NGN.toLocaleString()}. Please enter a new amount.`,
+                  phone_number_id,
+                );
+                return;
+              }
+
               const rateData = await fetchRates({
                 fromCurrency: "naira",
                 toCurrency: "USD",
@@ -3389,7 +3400,7 @@ async function processFlowCompletion(phone, phone_number_id, form) {
         "❌ We couldn't create your account. Let's try that again 👇",
         phone_number_id,
       );
-        await triggerFlow(phone, phone_number_id);
+      await triggerFlow(phone, phone_number_id);
       return;
     }
 
@@ -3978,6 +3989,19 @@ async function handlePinFlowSubmission({
         const rawError = depositResult.error?.message || "Unknown server error";
         const friendly = await humanizeError(rawError, "confirm deposit");
         await sendWhatsApp(phone, friendly, phone_number_id);
+
+        await updateSession(phone, {
+          data: {
+            ...session.data,
+            awaitingDepositPin: false,
+            pendingDeposit: true,
+          },
+        });
+        await sendWhatsApp(
+          phone,
+          "💰 Please enter the amount in NGN you'd like to deposit:",
+          phone_number_id,
+        );
         return;
       }
 
