@@ -67,6 +67,7 @@ const PIN_FLOW_ID = process.env.PIN_FLOW_ID;
 const NIN_FLOW_ID = process.env.NIN_FLOW_ID;
 const BVN_FLOW_ID = process.env.BVN_FLOW_ID;
 const BANK_SELECTION_FLOW_ID = process.env.BANK_SELECTION_FLOW_ID;
+const COUNTRY_SELECTION_FLOW_ID = process.env.COUNTRY_SELECTION_FLOW_ID;
 
 function formatDobToISO(dob) {
   if (!dob) return null;
@@ -1582,58 +1583,7 @@ router.post("/callback", async (req, res) => {
               return;
             }
 
-            // if (actionId === "WITHDRAW_REGION_OTHER") {
-            //   const countriesRes = await fetchSupportedCountries("africa");
-            //   if (!countriesRes.success || !countriesRes.data.length) {
-            //     await sendWhatsApp(
-            //       from,
-            //       "⚠️ Unable to load supported countries right now.",
-            //       phone_number_id,
-            //     );
-            //     return;
-            //   }
-
-            //   // Map up to 10 countries for WhatsApp list
-            //   const topCountries = countriesRes.data.slice(0, 10);
-            //   const rows = topCountries.map((c) => ({
-            //     id: `WITHDRAW_COUNTRY_${c.countryCode}`,
-            //     title: `${c.flag} ${c.countryName}`.substring(0, 24),
-            //   }));
-
-            //   await updateSession(from, {
-            //     data: {
-            //       ...session.data,
-            //       withdraw: {
-            //         ...session.data.withdraw,
-            //         step: "SELECT_COUNTRY",
-            //       },
-            //     },
-            //   });
-
-            //   await sendWhatsApp(
-            //     from,
-            //     {
-            //       type: "interactive",
-            //       interactive: {
-            //         type: "list",
-            //         body: { text: "🌍 Select your withdrawal country:" },
-            //         action: {
-            //           button: "Select Country",
-            //           sections: [{ title: "Supported Countries", rows }],
-            //         },
-            //       },
-            //     },
-            //     phone_number_id,
-            //   );
-            //   return;
-            // }
-
             if (actionId === "WITHDRAW_REGION_OTHER") {
-              // await sendWhatsApp(
-              //   from,
-              //   "⏳ Loading supported countries...",
-              //   phone_number_id,
-              // );
               const countriesRes = await fetchSupportedCountries("africa");
 
               if (!countriesRes.success || !countriesRes.data.length) {
@@ -1647,25 +1597,22 @@ router.post("/callback", async (req, res) => {
                 return;
               }
 
-              // 1. Initialize pagination in session
+              // Save full list so the completion handler can look up the country name
               await updateSession(from, {
                 data: {
                   ...session.data,
                   withdraw: {
                     ...session.data.withdraw,
                     step: "SELECT_COUNTRY",
-                    countriesList: countriesRes.data, // Save full array to memory
-                    currentPage: 0, // Start on page 0
+                    countriesList: countriesRes.data,
                   },
                 },
               });
 
-              // 2. Trigger the paginated menu helper
-              await sendPaginatedCountriesMenu(
+              await triggerCountrySelectionFlow(
                 from,
                 phone_number_id,
                 countriesRes.data,
-                0,
               );
               return;
             }
@@ -3347,6 +3294,53 @@ async function processFlowCompletion(phone, phone_number_id, form) {
     return;
   }
 
+  if (flowToken.includes("::COUNTRY_SELECT")) {
+    const countryCode = form.selected_country_id;
+    const countrySession = await getSession(phone);
+
+    // 1. Fetch payment channels for the selected country
+    const channelsRes = await fetchPaymentChannels(countryCode, "withdraw");
+    console.log(countryCode, channelsRes, "channelsRes from country flow");
+
+    if (!channelsRes.success || !channelsRes.data?.items?.length) {
+      await sendWhatsApp(
+        phone,
+        "⚠️ No payment channels available for this country currently.",
+        phone_number_id,
+      );
+      return;
+    }
+
+    // 2. Prefer momo channel, otherwise first available
+    const items = channelsRes.data.items;
+    const momoChannel = items.find(
+      (c) => c.channelType?.toLowerCase() === "momo",
+    );
+    const selectedChannel = momoChannel || items[0];
+
+    console.log(
+      `Selected channel for ${countryCode}:`,
+      selectedChannel.id,
+      selectedChannel.channelType,
+    );
+
+    // 3. Save to session and advance the withdraw flow
+    await updateSession(phone, {
+      data: {
+        ...countrySession.data,
+        withdraw: {
+          ...countrySession.data.withdraw,
+          countryCode,
+          channelId: selectedChannel.id,
+          step: "SELECT_WITHDRAW_TYPE",
+        },
+      },
+    });
+
+    await sendWithdrawTypeMenu(phone, phone_number_id);
+    return;
+  }
+
   const firstName = form.screen_0_First_Name_0 || form.First_Name_4f74a5;
   const lastName = form.screen_0_Last_Name_1 || form.Last_Name_76477c;
   const email = form.screen_0_Email_2;
@@ -3719,6 +3713,11 @@ router.post("/flow/callback", async (req, res) => {
           data: {
             banks: data.banks || [],
           },
+        };
+      } else if (screen === "SELECT_COUNTRY") {
+        responsePayload = {
+          screen: "SELECT_COUNTRY",
+          data: { countries: data.countries || [] },
         };
       } else {
         responsePayload = {
@@ -5210,6 +5209,58 @@ async function triggerBankSelectionFlow(toPhone, phone_number_id, banks) {
     console.error("triggerBankSelectionFlow failed:", res.status, debug);
   }
   console.log("triggerBankSelectionFlow sent to", toPhone);
+}
+
+async function triggerCountrySelectionFlow(
+  toPhone,
+  phone_number_id,
+  countries,
+) {
+  const url = `https://graph.facebook.com/${WHATSAPP_API_VERSION}/${phone_number_id}/messages`;
+
+  const countryOptions = countries.map((c) => ({
+    id: c.countryCode,
+    title: `${c.flag} ${c.countryName}`.substring(0, 30),
+  }));
+
+  const body = {
+    messaging_product: "whatsapp",
+    to: toPhone,
+    type: "interactive",
+    interactive: {
+      type: "flow",
+      body: { text: "🌍 Please select your withdrawal country" },
+      action: {
+        name: "flow",
+        parameters: {
+          flow_id: COUNTRY_SELECTION_FLOW_ID,
+          flow_token: `${toPhone}::COUNTRY_SELECT`,
+          flow_cta: "Select Country",
+          flow_message_version: "3",
+          flow_action: "navigate",
+          flow_action_payload: {
+            screen: "SELECT_COUNTRY",
+            data: { countries: countryOptions },
+          },
+        },
+      },
+    },
+  };
+
+  const res = await fetch(url, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${WHATSAPP_TOKEN}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(body),
+  });
+
+  if (!res.ok) {
+    const debug = await res.text();
+    console.error("triggerCountrySelectionFlow failed:", res.status, debug);
+  }
+  console.log("triggerCountrySelectionFlow sent to", toPhone);
 }
 
 /* ------------- WA send helper (text + interactive) ------------- */
