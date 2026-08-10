@@ -68,6 +68,7 @@ const NIN_FLOW_ID = process.env.NIN_FLOW_ID;
 const BVN_FLOW_ID = process.env.BVN_FLOW_ID;
 const BANK_SELECTION_FLOW_ID = process.env.BANK_SELECTION_FLOW_ID;
 const COUNTRY_SELECTION_FLOW_ID = process.env.COUNTRY_SELECTION_FLOW_ID;
+const ITEM_SELECTION_FLOW_ID = process.env.ITEM_SELECTION_FLOW_ID;
 
 function formatDobToISO(dob) {
   if (!dob) return null;
@@ -863,56 +864,28 @@ router.post("/callback", async (req, res) => {
                 new Map(coins.map((c) => [c.coin, c])).values(),
               );
 
-              let rows = [];
-
-              // const rows = uniqueCoins.slice(0, 10).map((coinObj) => ({
-              //   id: `SEND_COIN_${coinObj.coin}`,
-              //   title: coinObj.coin,
-              //   description: `${coinObj.chains?.length || 1} network(s)`,
-              // }));
-
-              if (type === "P2P") {
-                // For P2P: Clean list, no network details needed
-                rows = uniqueCoins.slice(0, 10).map((coinObj) => ({
-                  id: `SEND_COIN_${coinObj.coin}`,
-                  title: coinObj.coin,
-                  description: "Send to Vixa user",
-                }));
-              } else {
-                // For External: Show network counts
-                rows = uniqueCoins.slice(0, 10).map((coinObj) => ({
-                  id: `SEND_COIN_${coinObj.coin}`,
-                  title: coinObj.coin,
-                  description: `${coinObj.chains?.length || 1} network(s)`,
-                }));
-              }
-
               await updateSession(from, {
                 data: {
                   ...session.data,
-                  send: {
-                    step: "SELECT_COIN",
-                    type,
-                    coins,
-                  },
+                  send: { step: "SELECT_COIN", type, coins },
                 },
               });
 
-              await sendWhatsApp(
-                from,
-                {
-                  type: "interactive",
-                  interactive: {
-                    type: "list",
-                    body: { text: "📤 Select coin to send" },
-                    action: {
-                      button: "Select coin",
-                      sections: [{ title: "Available Coins", rows }],
-                    },
-                  },
-                },
-                phone_number_id,
-              );
+              await triggerItemSelectionFlow(from, phone_number_id, {
+                context: "SEND_COIN",
+                items: uniqueCoins.map((c) => ({
+                  id: c.coin,
+                  title: c.coin,
+                  description:
+                    type === "P2P"
+                      ? "Send to Vixa user"
+                      : `${c.chains?.length || 1} network(s)`,
+                })),
+                bodyText: "📤 Select the coin you want to send",
+                heading: "Select coin to send",
+                label: "Coin",
+                cta: "Select Coin",
+              });
 
               return;
             }
@@ -946,11 +919,6 @@ router.post("/callback", async (req, res) => {
                 );
                 return;
               }
-              const rows = balances.slice(0, 10).map((b) => ({
-                id: `WITHDRAW_COIN_${b.coin}`,
-                title: b.coin,
-                description: `Bal: ${b.balance}`,
-              }));
 
               await updateSession(from, {
                 data: {
@@ -958,21 +926,19 @@ router.post("/callback", async (req, res) => {
                   withdraw: { ...session.data.withdraw, step: "SELECT_COIN" },
                 },
               });
-              await sendWhatsApp(
-                from,
-                {
-                  type: "interactive",
-                  interactive: {
-                    type: "list",
-                    body: { text: "Select a coin to withdraw:" },
-                    action: {
-                      button: "Select Coin",
-                      sections: [{ title: "Your Coins", rows }],
-                    },
-                  },
-                },
-                phone_number_id,
-              );
+
+              await triggerItemSelectionFlow(from, phone_number_id, {
+                context: "WITHDRAW_COIN",
+                items: balances.map((b) => ({
+                  id: b.coin,
+                  title: b.coin,
+                  description: `Bal: ${b.balance}`,
+                })),
+                bodyText: "Select the coin you want to withdraw",
+                heading: "Select a coin to withdraw",
+                label: "Coin",
+                cta: "Select Coin",
+              });
               return;
             }
 
@@ -1238,7 +1204,6 @@ router.post("/callback", async (req, res) => {
                 const session = await getSession(from);
                 const walletsRes = await fetchReceiveWallets();
 
-                console.log(walletsRes, "walletsReswalletsRes");
                 if (!walletsRes.success) {
                   await sendWhatsApp(
                     from,
@@ -1257,39 +1222,28 @@ router.post("/callback", async (req, res) => {
                   );
                   break;
                 }
-                // Unique coins only
+
                 const uniqueCoins = [...new Set(wallets.map((w) => w.coin))];
 
-                const rows = uniqueCoins.slice(0, 10).map((coin) => ({
-                  id: `RECEIVE_COIN_${coin}`,
-                  title: coin,
-                  description: `Receive ${coin}`,
-                }));
                 await updateSession(from, {
                   data: {
                     ...session.data,
-                    receive: {
-                      step: "SELECT_COIN",
-                      wallets,
-                    },
+                    receive: { step: "SELECT_COIN", wallets },
                   },
                 });
 
-                await sendWhatsApp(
-                  from,
-                  {
-                    type: "interactive",
-                    interactive: {
-                      type: "list",
-                      body: { text: "📥 Select the coin you want to receive" },
-                      action: {
-                        button: "Select coin",
-                        sections: [{ title: "Available Coins", rows }],
-                      },
-                    },
-                  },
-                  phone_number_id,
-                );
+                await triggerItemSelectionFlow(from, phone_number_id, {
+                  context: "RECEIVE_COIN",
+                  items: uniqueCoins.map((coin) => ({
+                    id: coin,
+                    title: coin,
+                    description: `Receive ${coin}`,
+                  })),
+                  bodyText: "📥 Select the coin you want to receive",
+                  heading: "Select coin to receive",
+                  label: "Coin",
+                  cta: "Select Coin",
+                });
 
                 break;
               }
@@ -1395,18 +1349,22 @@ router.post("/callback", async (req, res) => {
                     swap: {
                       step: "SELECT_FROM",
                       allCoins: selectedCoins,
-                      currentFromPage: 0,
                     },
                   },
                 });
 
-                await sendPaginatedSwapCoinsMenu(
-                  from,
-                  phone_number_id,
-                  selectedCoins,
-                  0,
-                  "FROM",
-                );
+                await triggerItemSelectionFlow(from, phone_number_id, {
+                  context: "SWAP_FROM",
+                  items: selectedCoins.map((c) => ({
+                    id: c.coin,
+                    title: c.coin,
+                    description: `Min: ${c.minAmount}, Max: ${c.maxAmount}`,
+                  })),
+                  bodyText: "🔄 Select the coin you want to swap from",
+                  heading: "Select the coin you want to swap from",
+                  label: "Coin",
+                  cta: "Select Coin",
+                });
                 break;
               }
               case "GET_WALLET_BALANCE": {
@@ -2038,135 +1996,9 @@ router.post("/callback", async (req, res) => {
                 },
               });
 
-              // await sendWhatsApp(
-              //   from,
-              //   "🔐 Please enter your *4-digit PIN* to confirm this deposit.",
-              //   phone_number_id,
-              // );
               await triggerPinFlow(from, phone_number_id, "DEPOSIT");
               return;
             }
-
-            //             if (session.data?.awaitingDepositPin) {
-            //               const pin = msg.text?.body?.trim();
-
-            //               if (!pin || pin.length !== 4) {
-            //                 await sendWhatsApp(
-            //                   from,
-            //                   "⚠️ Please enter a valid 4-digit PIN.",
-            //                   phone_number_id,
-            //                 );
-            //                 return;
-            //               }
-            //               // Call depositCrypto
-            //               const depositCypto = await depositCrypto({
-            //                 currency: session.data.depositCurrency,
-            //                 amountNgn: session.data.depositAmount,
-            //                 channelId: "AF944F0C-BA70-47C7-86DC-1BAD5A6AB4E4",
-            //                 coin: session.data.depositCoin,
-            //                 // chain: session.data.depositChain,
-            //                 correlationId: `CORR-${Date.now()}`,
-            //                 idempotencyKey: `IDEMPOTENCY-${Date.now()}`,
-            //                 pin,
-            //               });
-
-            //               console.log(depositCypto, "depositCryptodepositCrypto");
-
-            //               if (depositCypto.success) {
-            //                 const depositData = depositCypto.data.data;
-
-            //                 // 1. Format Expiry Time (e.g., "12:14 PM")
-            //                 const expiryDate = new Date(depositData.expiresAtUtc);
-            //                 const formattedExpiry = expiryDate.toLocaleTimeString("en-NG", {
-            //                   hour: "2-digit",
-            //                   minute: "2-digit",
-            //                   hour12: true,
-            //                   timeZone: "Africa/Lagos",
-            //                 });
-
-            //                 // 2. Format Amount with commas (e.g., "14,000")
-            //                 const formattedAmount =
-            //                   depositData.amountToPayNgn?.toLocaleString("en-NG");
-
-            //                 const accNo = depositData.accountNumber;
-            //                 // const bank = depositData.bankName;
-
-            //                 await sendWhatsApp(
-            //                   from,
-            //                   {
-            //                     type: "interactive",
-            //                     interactive: {
-            //                       type: "button",
-            //                       body: {
-            //                         text: `✅ *Deposit Initiated*
-
-            // Please make a transfer using the details below:
-            // 💰 *Amount:* ₦${formattedAmount}
-            // 🏦 *Bank Name:* ${depositCypto?.data?.data?.bankName}
-            // 👤 *Account Name:* ${depositCypto?.data?.data?.accountName}
-            // 🔢 *Account Number:* \`${accNo}\`
-            // 🧾 *Reference:* ${depositCypto?.data?.data?.reference}
-            // ⏳ *Expires At:* ${formattedExpiry}
-
-            // Once you’ve completed the transfer, tap *Confirm Payment* below.`,
-            //                       },
-            //                       action: {
-            //                         buttons: [
-            //                           {
-            //                             type: "reply",
-            //                             reply: {
-            //                               id: "CONFIRM_DEPOSIT_PAYMENT",
-            //                               title: "Confirm Payment",
-            //                             },
-            //                           },
-            //                         ],
-            //                       },
-            //                     },
-            //                   },
-            //                   phone_number_id,
-            //                 );
-
-            //                 await updateSession(from, {
-            //                   data: {
-            //                     ...session.data,
-            //                     pendingDeposit: false,
-            //                     awaitingDepositConfirmation: true,
-            //                     awaitingDepositPin: false,
-            //                     depositReference: depositCypto?.data?.data?.reference,
-            //                     depositAmount: session.data.depositAmount,
-            //                     depositCoin: session.data.depositCoin,
-            //                     id: session.data.id,
-            //                   },
-            //                 });
-            //               }
-
-            //               return; // Stop further processing
-            //             }
-
-            //             if (session.data?.awaitingDepositConfirmation) {
-            //               const confirmDeposit = await confirmPayment({
-            //                 id: session.data.id,
-            //               });
-            //               console.log(confirmDeposit, "confirmDeposit.data");
-
-            //               await sendWhatsApp(
-            //                 from,
-            //                 `✅ Your deposit is currently being processed in the background.
-
-            // You’ll receive a notification on WhatsApp (and email, if available) once it’s completed.
-
-            // Thanks for using VIXA 🚀`,
-            //                 phone_number_id,
-            //               );
-
-            //               await sendWhatsApp(
-            //                 from,
-            //                 "What would you like to do next?",
-            //                 phone_number_id,
-            //               );
-
-            //               await sendMainMenu(from, phone_number_id);
-            //             }
 
             if (session.data?.swap?.step === "ENTER_AMOUNT") {
               const amount = parseFloat(msg.text?.body?.trim());
@@ -2207,89 +2039,24 @@ router.post("/callback", async (req, res) => {
                     step: "SELECT_TO",
                     amount,
                     toCoins,
-                    currentToPage: 0,
                   },
                 },
               });
 
-              await sendPaginatedSwapCoinsMenu(
-                from,
-                phone_number_id,
-                toCoins,
-                0,
-                "TO",
-              );
+              await triggerItemSelectionFlow(from, phone_number_id, {
+                context: "SWAP_TO",
+                items: toCoins.map((c) => ({
+                  id: c.coin,
+                  title: c.coin,
+                  description: `Min: ${c.minAmount}, Max: ${c.maxAmount}`,
+                })),
+                bodyText: "➡️ Select the coin you want to receive",
+                heading: "Select the coin you want to receive",
+                label: "Coin",
+                cta: "Select Coin",
+              });
               return;
             }
-
-            // if (session.data?.swap?.step === "AWAITING_SWAP_PIN") {
-            //   const pin = msg.text?.body?.trim();
-
-            //   if (!pin || pin.length < 4) {
-            //     await sendWhatsApp(
-            //       from,
-            //       "⚠️ Enter a valid PIN.",
-            //       phone_number_id,
-            //     );
-            //     return;
-            //   }
-
-            //   const { fromCoin, amount, toCoin } = session.data.swap;
-
-            //   const swapResult = await executeSwap({
-            //     fromCoin,
-            //     fromAmount: amount,
-            //     toCoin,
-            //     pin,
-            //   });
-
-            //   console.log(swapResult, "swapResultswapResult");
-
-            //   if (!swapResult.success) {
-            //     const rawError =
-            //       swapResult.error?.message || "Unknown server error";
-            //     const friendlyMessage = await humanizeError(
-            //       rawError,
-            //       "execute a crypto swap",
-            //     );
-
-            //     await sendWhatsApp(from, friendlyMessage, phone_number_id);
-
-            //     await sendWhatsApp(
-            //       from,
-            //       "What would you like to do next?",
-            //       phone_number_id,
-            //     );
-
-            //     await sendMainMenu(from, phone_number_id);
-            //     return;
-            //   }
-
-            //   await sendWhatsApp(
-            //     from,
-            //     `✅ *Swap Successful!*\n\n` +
-            //       `${amount} ${fromCoin} → ${swapResult.data.data.toAmount} ${toCoin}\n\n` +
-            //       `🎉 Your wallet has been updated.`,
-            //     phone_number_id,
-            //   );
-
-            //   // Reset swap state
-            //   await updateSession(from, {
-            //     data: {
-            //       ...session.data,
-            //       swap: null,
-            //     },
-            //   });
-
-            //   await sendWhatsApp(
-            //     from,
-            //     "What would you like to do next?",
-            //     phone_number_id,
-            //   );
-            //   await sendMainMenu(from, phone_number_id);
-
-            //   return;
-            // }
 
             if (session.data?.send?.step === "ENTER_AMOUNT") {
               console.log("amount is logged", msg.text?.body);
@@ -3341,6 +3108,26 @@ async function processFlowCompletion(phone, phone_number_id, form) {
     return;
   }
 
+  if (flowToken.includes("::ITEM_SELECT")) {
+    const selectedId = form.selected_item_id;
+    const itemContext = flowToken.split("::")[2] || null;
+
+    console.log(
+      "Item flow submission. Context:",
+      itemContext,
+      "Id:",
+      selectedId,
+    );
+
+    await handleItemSelection({
+      phone,
+      phone_number_id,
+      selectedId,
+      itemContext,
+    });
+    return;
+  }
+
   const firstName = form.screen_0_First_Name_0 || form.First_Name_4f74a5;
   const lastName = form.screen_0_Last_Name_1 || form.Last_Name_76477c;
   const email = form.screen_0_Email_2;
@@ -3693,16 +3480,7 @@ router.post("/flow/callback", async (req, res) => {
           status: "active", // Required successful response
         },
       };
-    }
-    // --- B. DATA EXCHANGE LOGIC (For future real-time validation) ---
-    // else if (action === "data_exchange") {
-    //   console.log("Data exchange request received. Returning failure screen.");
-    //   responsePayload = {
-    //     screen: "FAILURE",
-    //     data: { message: "Data Exchange not implemented." },
-    //   };
-    // }
-    else if (action === "data_exchange") {
+    } else if (action === "data_exchange") {
       const screen = decryptedBody.screen;
       const data = decryptedBody.data;
 
@@ -3718,6 +3496,15 @@ router.post("/flow/callback", async (req, res) => {
         responsePayload = {
           screen: "SELECT_COUNTRY",
           data: { countries: data.countries || [] },
+        };
+      } else if (screen === "SELECT_ITEM") {
+        responsePayload = {
+          screen: "SELECT_ITEM",
+          data: {
+            heading: data.heading || "Select an option",
+            label: data.label || "Option",
+            items: data.items || [],
+          },
         };
       } else {
         responsePayload = {
@@ -4469,6 +4256,331 @@ async function handlePinFlowSubmission({
   }
 }
 
+async function handleItemSelection({
+  phone,
+  phone_number_id,
+  selectedId,
+  itemContext,
+}) {
+  const session = await getSession(phone);
+
+  if (!selectedId) {
+    await sendWhatsApp(phone, "⚠️ Nothing was selected.", phone_number_id);
+    return;
+  }
+
+  switch (itemContext) {
+    // ── SWAP: from-coin ──────────────────────────────
+    case "SWAP_FROM": {
+      const selected = session.data?.swap?.allCoins?.find(
+        (c) => c.coin === selectedId,
+      );
+
+      if (!selected) {
+        await sendWhatsApp(
+          phone,
+          "⚠️ Coin not found. Please start over.",
+          phone_number_id,
+        );
+        await sendMainMenu(phone, phone_number_id);
+        return;
+      }
+
+      await updateSession(phone, {
+        data: {
+          ...session.data,
+          swap: {
+            ...session.data.swap,
+            step: "ENTER_AMOUNT",
+            fromCoin: selectedId,
+            fromCoinLimits: selected,
+          },
+        },
+      });
+
+      await sendWhatsApp(
+        phone,
+        `💰 Enter amount of *${selectedId}* to swap\n\nMin: ${selected.minAmount}\nMax: ${selected.maxAmount}`,
+        phone_number_id,
+      );
+      return;
+    }
+
+    // ── SWAP: to-coin ────────────────────────────────
+    case "SWAP_TO": {
+      const toCoin = selectedId;
+      const { amount, fromCoin } = session.data?.swap || {};
+
+      const quote = await fetchSwapQuote({
+        fromCoin,
+        toCoin,
+        fromAmount: amount,
+      });
+
+      if (!quote.success) {
+        const rawError = quote.error?.message || "Unknown server error";
+        const friendly = await humanizeError(rawError, "get a swap quote");
+        await sendWhatsApp(phone, friendly, phone_number_id);
+        return;
+      }
+
+      await updateSession(phone, {
+        data: {
+          ...session.data,
+          swap: {
+            ...session.data.swap,
+            step: "AWAITING_SWAP_PIN",
+            toCoin,
+            quote: quote.data.data,
+          },
+        },
+      });
+
+      await sendWhatsApp(
+        phone,
+        `🔄 *Swap Ready*\n\n` +
+          `From: ${amount} ${fromCoin}\n` +
+          `To: ${quote.data.data.toAmount} ${toCoin}\n` +
+          `Fee: ${quote.data.data.fee}\n\n` +
+          `🔐 Please enter your *PIN* to authorize this swap.`,
+        phone_number_id,
+      );
+      await triggerPinFlow(phone, phone_number_id, "SWAP");
+      return;
+    }
+
+    // ── SEND: coin ───────────────────────────────────
+    case "SEND_COIN": {
+      const coin = selectedId;
+      const selectedCoin = session.data?.send?.coins?.find(
+        (c) => c.coin === coin,
+      );
+
+      if (!selectedCoin) {
+        await sendWhatsApp(phone, "⚠️ Coin not found.", phone_number_id);
+        return;
+      }
+
+      // P2P → no chain needed
+      if (session.data.send.type === "P2P") {
+        await updateSession(phone, {
+          data: {
+            ...session.data,
+            send: {
+              ...session.data.send,
+              coin,
+              chain: null,
+              step: "ENTER_AMOUNT",
+            },
+          },
+        });
+        await sendWhatsApp(
+          phone,
+          `💸 Enter amount of *${coin}* to send:`,
+          phone_number_id,
+        );
+        return;
+      }
+
+      const chains = selectedCoin.chains || [];
+
+      // Single chain → auto-select
+      if (chains.length === 1) {
+        await updateSession(phone, {
+          data: {
+            ...session.data,
+            send: {
+              ...session.data.send,
+              coin,
+              chain: chains[0],
+              step: "ENTER_AMOUNT",
+            },
+          },
+        });
+        await sendWhatsApp(
+          phone,
+          `💸 Enter amount of *${coin}* to send\nMin: ${chains[0].minWithdrawAmount}`,
+          phone_number_id,
+        );
+        return;
+      }
+
+      // Multi-chain → second selection flow
+      await updateSession(phone, {
+        data: {
+          ...session.data,
+          send: { ...session.data.send, coin, chains, step: "SELECT_CHAIN" },
+        },
+      });
+
+      await triggerItemSelectionFlow(phone, phone_number_id, {
+        context: "SEND_CHAIN",
+        items: chains.map((ch) => ({
+          id: ch.chain,
+          title: ch.chain,
+          description: `Min: ${ch.minWithdrawAmount}`,
+        })),
+        bodyText: `📤 Select the ${coin} network`,
+        heading: `Select ${coin} network`,
+        label: "Network",
+        cta: "Select Network",
+      });
+      return;
+    }
+
+    // ── SEND: chain ──────────────────────────────────
+    case "SEND_CHAIN": {
+      const chain = session.data?.send?.chains?.find(
+        (c) => c.chain === selectedId,
+      );
+
+      if (!chain) {
+        await sendWhatsApp(phone, "⚠️ Network not found.", phone_number_id);
+        return;
+      }
+
+      await updateSession(phone, {
+        data: {
+          ...session.data,
+          send: { ...session.data.send, chain, step: "ENTER_AMOUNT" },
+        },
+      });
+
+      await sendWhatsApp(
+        phone,
+        `💸 Enter amount of *${session.data.send.coin}* to send\nMin: ${chain.minWithdrawAmount}`,
+        phone_number_id,
+      );
+      return;
+    }
+
+    // ── RECEIVE: coin ────────────────────────────────
+    case "RECEIVE_COIN": {
+      const coin = selectedId;
+      const walletsRes = await fetchReceiveWallets({ coin });
+
+      if (!walletsRes.success) {
+        await sendWhatsApp(
+          phone,
+          "⚠️ Unable to load receive wallets.",
+          phone_number_id,
+        );
+        return;
+      }
+
+      const wallets = walletsRes?.data?.data?.data || [];
+
+      if (!wallets.length) {
+        await sendWhatsApp(
+          phone,
+          `⚠️ No receive wallets available for ${coin}.`,
+          phone_number_id,
+        );
+        return;
+      }
+
+      // Single wallet → show address directly
+      if (wallets.length === 1) {
+        const w = wallets[0];
+        await sendWhatsApp(
+          phone,
+          `📥 *${w.coin} Receive Address*\n\n` +
+            `Network: ${w.network}\n` +
+            `Chain: ${w.chain}\n\n` +
+            `📌 *Tap & hold to copy address:*\n` +
+            `\`\`\`\n${w.address}\n\`\`\``,
+          phone_number_id,
+        );
+        await updateSession(phone, {
+          data: { ...session.data, receive: null },
+        });
+        await sendMainMenu(phone, phone_number_id);
+        return;
+      }
+
+      await updateSession(phone, {
+        data: {
+          ...session.data,
+          receive: { step: "SELECT_CHAIN", wallets, selectedCoin: coin },
+        },
+      });
+
+      await triggerItemSelectionFlow(phone, phone_number_id, {
+        context: "RECEIVE_WALLET",
+        items: wallets.map((w) => ({
+          id: w.id,
+          title: w.chain,
+          description: w.network,
+        })),
+        bodyText: `📥 Select the ${coin} network`,
+        heading: `Select ${coin} network`,
+        label: "Network",
+        cta: "Select Network",
+      });
+      return;
+    }
+
+    // ── RECEIVE: wallet / chain ──────────────────────
+    case "RECEIVE_WALLET": {
+      const wallet = session.data?.receive?.wallets?.find(
+        (w) => String(w.id) === String(selectedId),
+      );
+
+      if (!wallet) {
+        await sendWhatsApp(phone, "⚠️ Wallet not found.", phone_number_id);
+        return;
+      }
+
+      await sendWhatsApp(
+        phone,
+        `📥 *${wallet.coin} Receive Address*\n\n` +
+          `Network: ${wallet.network}\n` +
+          `Chain: ${wallet.chain}\n\n` +
+          `📌 *Tap & hold to copy address:*\n` +
+          `\`\`\`\n${wallet.address}\n\`\`\``,
+        phone_number_id,
+      );
+
+      await updateSession(phone, {
+        data: { ...session.data, receive: null },
+      });
+      await sendMainMenu(phone, phone_number_id);
+      return;
+    }
+
+    // ── WITHDRAW: coin ───────────────────────────────
+    case "WITHDRAW_COIN": {
+      await updateSession(phone, {
+        data: {
+          ...session.data,
+          withdraw: {
+            ...session.data.withdraw,
+            coin: selectedId,
+            step: "ENTER_AMOUNT",
+          },
+        },
+      });
+
+      await sendWhatsApp(
+        phone,
+        `💰 Please enter the amount of *${selectedId}* you want to withdraw:`,
+        phone_number_id,
+      );
+      return;
+    }
+
+    default: {
+      console.warn("Unknown itemContext:", itemContext);
+      await sendWhatsApp(
+        phone,
+        "⚠️ Something went wrong with that selection. Please start over.",
+        phone_number_id,
+      );
+      await sendMainMenu(phone, phone_number_id);
+    }
+  }
+}
+
 async function sendPaginatedSwapCoinsMenu(
   to,
   phone_number_id,
@@ -4739,29 +4851,23 @@ async function routeToFlow(flow, from, phone_number_id, sessionData) {
         return;
       }
       const uniqueCoins = [...new Set(wallets.map((w) => w.coin))];
-      const rows = uniqueCoins.slice(0, 10).map((coin) => ({
-        id: `RECEIVE_COIN_${coin}`,
-        title: coin,
-        description: `Receive ${coin}`,
-      }));
+
       await updateSession(from, {
         data: { ...sessionData, receive: { step: "SELECT_COIN", wallets } },
       });
-      await sendWhatsApp(
-        from,
-        {
-          type: "interactive",
-          interactive: {
-            type: "list",
-            body: { text: "📥 Select the coin you want to receive" },
-            action: {
-              button: "Select coin",
-              sections: [{ title: "Available Coins", rows }],
-            },
-          },
-        },
-        phone_number_id,
-      );
+
+      await triggerItemSelectionFlow(from, phone_number_id, {
+        context: "RECEIVE_COIN",
+        items: uniqueCoins.map((coin) => ({
+          id: coin,
+          title: coin,
+          description: `Receive ${coin}`,
+        })),
+        bodyText: "📥 Select the coin you want to receive",
+        heading: "Select coin to receive",
+        label: "Coin",
+        cta: "Select Coin",
+      });
       break;
     }
     case "SWAP": {
@@ -4776,23 +4882,29 @@ async function routeToFlow(flow, from, phone_number_id, sessionData) {
       }
       const allCoins = currenciesRes?.data?.data?.currencies;
       const selectedCoins = pickPreferredCoins(allCoins, PREFERRED_COINS);
+
       await updateSession(from, {
         data: {
           ...sessionData,
           swap: {
             step: "SELECT_FROM",
             allCoins: selectedCoins,
-            currentFromPage: 0,
           },
         },
       });
-      await sendPaginatedSwapCoinsMenu(
-        from,
-        phone_number_id,
-        selectedCoins,
-        0,
-        "FROM",
-      );
+
+      await triggerItemSelectionFlow(from, phone_number_id, {
+        context: "SWAP_FROM",
+        items: selectedCoins.map((c) => ({
+          id: c.coin,
+          title: c.coin,
+          description: `Min: ${c.minAmount}, Max: ${c.maxAmount}`,
+        })),
+        bodyText: "🔄 Select the coin you want to swap from",
+        heading: "Select the coin you want to swap from",
+        label: "Coin",
+        cta: "Select Coin",
+      });
       break;
     }
     case "BALANCE": {
@@ -5261,6 +5373,70 @@ async function triggerCountrySelectionFlow(
     console.error("triggerCountrySelectionFlow failed:", res.status, debug);
   }
   console.log("triggerCountrySelectionFlow sent to", toPhone);
+}
+
+/**
+ * Generic single-select flow.
+ * context: SWAP_FROM | SWAP_TO | SEND_COIN | SEND_CHAIN | RECEIVE_COIN | RECEIVE_WALLET | WITHDRAW_COIN
+ * items: [{ id, title, description }]
+ */
+async function triggerItemSelectionFlow(
+  toPhone,
+  phone_number_id,
+  { context, items, bodyText, heading, label, cta },
+) {
+  if (!WHATSAPP_TOKEN || !phone_number_id) {
+    console.log("[MOCK ITEM FLOW] to:", toPhone, "context:", context);
+    return;
+  }
+
+  const url = `https://graph.facebook.com/${WHATSAPP_API_VERSION}/${phone_number_id}/messages`;
+
+  // Every item MUST have all three keys or the dropdown renders blank
+  const safeItems = items.map((i) => ({
+    id: String(i.id),
+    title: String(i.title).substring(0, 30),
+    description: String(i.description ?? "—").substring(0, 60),
+  }));
+
+  const body = {
+    messaging_product: "whatsapp",
+    to: toPhone,
+    type: "interactive",
+    interactive: {
+      type: "flow",
+      body: { text: bodyText },
+      action: {
+        name: "flow",
+        parameters: {
+          flow_id: ITEM_SELECTION_FLOW_ID,
+          flow_token: `${toPhone}::ITEM_SELECT::${context}`,
+          flow_cta: cta || "Select",
+          flow_message_version: "3",
+          flow_action: "navigate",
+          flow_action_payload: {
+            screen: "SELECT_ITEM",
+            data: { heading, label, items: safeItems },
+          },
+        },
+      },
+    },
+  };
+
+  const res = await fetch(url, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${WHATSAPP_TOKEN}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(body),
+  });
+
+  if (!res.ok) {
+    const debug = await res.text();
+    console.error("triggerItemSelectionFlow failed:", res.status, debug);
+  }
+  console.log("triggerItemSelectionFlow sent to", toPhone, "context:", context);
 }
 
 /* ------------- WA send helper (text + interactive) ------------- */
