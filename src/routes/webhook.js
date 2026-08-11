@@ -17,7 +17,9 @@ import { fetchAuthMe } from "../services/user.service.js";
 import { depositCrypto } from "../services/deposit.service.js";
 import { fetchWalletBalances } from "../services/wallet.service.js";
 import { fetchReceiveWallets } from "../services/recieve.service.js";
-import { analyzeUserIntent, humanizeError } from "../services/ai.service.js";
+import { humanizeError } from "../services/ai.service.js";
+import { resolveIntent } from "../ai/intentRouter.js";
+import { describeFlowState, clearedFlowState } from "../ai/flowState.js";
 import {
   fetchSwapCurrencies,
   fetchSwapQuote,
@@ -38,7 +40,6 @@ import {
 } from "../services/send.service.js";
 
 import { fetchRates } from "../services/rates.service.js";
-import { matchKeywordIntent } from "../utils/intentKeywords.js";
 import {
   requestChangePinOtp,
   changePinRequest,
@@ -123,16 +124,22 @@ const PREFERRED_COINS = [
   "UNI",
 ];
 
+// NOTE: these used to assume `allCurrencies` was always an array. When the
+// upstream response shape drifted, `.find()` threw a TypeError that only the
+// route's outermost catch saw — so the user got "Sure, let me take you there!"
+// and then nothing at all. Guard the input instead.
 function pickPreferredCoins(allCurrencies, preferredList) {
+  if (!Array.isArray(allCurrencies)) return [];
   return preferredList
-    .map((symbol) => allCurrencies.find((c) => c.coin === symbol))
+    .map((symbol) => allCurrencies.find((c) => c?.coin === symbol))
     .filter(Boolean); // pagination handles the 10-item limit now
 }
 
 function pickPreferredToCoins(allCurrencies, preferredList, fromCoin) {
+  if (!Array.isArray(allCurrencies)) return [];
   return preferredList
     .filter((symbol) => symbol !== fromCoin)
-    .map((symbol) => allCurrencies.find((c) => c.coin === symbol))
+    .map((symbol) => allCurrencies.find((c) => c?.coin === symbol))
     .filter(Boolean); // pagination handles the 10-item limit now
 }
 
@@ -1794,133 +1801,182 @@ router.post("/callback", async (req, res) => {
             //   return;
             // }
 
-            // ── ESCAPE HATCH: runs BEFORE flow logic, even mid-flow ──
-            const { flow: escapeFlow, matched: isEscape } =
-              matchKeywordIntent(rawText);
-            const isCancelSignal = isEscape && escapeFlow === "CANCEL";
-            const isNewFlowSignal = isEscape && escapeFlow !== "CANCEL";
+            // ═══════════════════════════════════════════════════════════
+            // UNIFIED INTENT ROUTER
+            //
+            // Every text message from an authenticated user passes through
+            // here exactly once — mid-flow or not. See src/ai/intentRouter.js
+            // for the pipeline. Only PROVIDE_INPUT falls through to the state
+            // machine below; everything else is answered and returns.
+            // ═══════════════════════════════════════════════════════════
+            const flowState = describeFlowState(session.data);
+            const isInActiveFlow = flowState.active;
 
-            const isInActiveFlow =
-              session.data?.pendingDeposit === true ||
-              session.data?.awaitingDepositPin === true ||
-              [
-                "ENTER_AMOUNT",
-                "ENTER_QUOTE_PIN",
-                "ENTER_ACCOUNT_NUMBER_OTHER",
-                "ENTER_ACCOUNT_NAME",
-                "ENTER_ACCOUNT_NUMBER",
-                "ENTER_EXECUTE_PIN",
-              ].includes(session.data?.withdraw?.step) ||
-              ["ENTER_AMOUNT", "ENTER_ADDRESS", "ENTER_TAG"].includes(
-                session.data?.send?.step,
-              ) ||
-              ["ENTER_AMOUNT"].includes(session.data?.swap?.step) ||
-              session.data?.changePin?.step === "ENTER_OTP" ||
-              ["ENTER_REASON", "ENTER_PIN"].includes(
-                session.data?.lockWallet?.step,
-              ) ||
-              ["ENTER_OTP", "ENTER_PIN"].includes(
-                session.data?.unlockWallet?.step,
-              );
+            // ── A pending "abandon this transaction?" question wins ──
+            if (session.data?.pendingSwitch) {
+              const pending = session.data.pendingSwitch;
+              const answer = (rawText || "").toLowerCase();
 
-            // If user is mid-flow but sending a cancel or new-flow signal → break out
-            if (isInActiveFlow && (isCancelSignal || isNewFlowSignal)) {
-              const clearedState = {
-                ...session.data,
-                pendingDeposit: false,
-                awaitingDepositPin: false,
-                awaitingDepositConfirmation: false,
-                swap: null,
-                send: null,
-                withdraw: null,
-                receive: null,
-                lockWallet: null,
-                unlockWallet: null,
-                changePin: null,
-              };
-              await updateSession(from, { data: clearedState });
-              const freshSession = await getSession(from);
+              await updateSession(from, {
+                data: { ...session.data, pendingSwitch: null },
+              });
+              session = await getSession(from);
 
-              if (isCancelSignal) {
+              if (/^(y|yes|yeah|yea|yep|ok|okay|sure|go ahead|proceed|do it)$/.test(answer)) {
+                await startFlow(pending.flow, from, phone_number_id, {
+                  ack: `👍 Cancelled. Taking you to ${humanFlowName(pending.flow)} 👇`,
+                });
+                return;
+              }
+
+              if (/^(n|no|nope|nah|stay|keep going)$/.test(answer)) {
                 await sendWhatsApp(
                   from,
-                  "Okay, I've cancelled that for you. 👍",
+                  "👍 No problem — let's finish what you started.",
+                  phone_number_id,
+                );
+                if (flowState.rePrompt) {
+                  await sendWhatsApp(from, flowState.rePrompt, phone_number_id);
+                }
+                return;
+              }
+              // Anything else: don't trap them in a yes/no loop — fall
+              // through and interpret the message normally.
+            }
+
+            const decision = await resolveIntent({
+              text: rawText,
+              sessionData: session.data,
+              profile: { firstName: session.data?.firstName },
+            });
+
+            console.log(
+              `[intent] "${rawText}" → ${decision.type}` +
+                `${decision.flow ? `/${decision.flow}` : ""}` +
+                ` (via ${decision.source}, conf ${decision.confidence})` +
+                ` | state: ${flowState.flow || "NONE"}/${flowState.step || "-"}`,
+            );
+
+            // Structured so intent quality is measurable in Seq rather than
+            // something we only discover from screenshots. Message text is
+            // deliberately omitted when the step is sealed.
+            logger.info("intent.resolved", {
+              decisionType: decision.type,
+              decisionFlow: decision.flow,
+              source: decision.source,
+              confidence: decision.confidence,
+              currentFlow: flowState.flow,
+              currentStep: flowState.step,
+              sealed: flowState.sealed,
+              text: flowState.sealed ? "[redacted]" : rawText,
+            });
+
+            if (decision.type === "ANSWER" || decision.type === "CLARIFY") {
+              await sendWhatsApp(
+                from,
+                decision.reply ||
+                  "I'm here to help with your VIXA wallet — what would you like to do?",
+                phone_number_id,
+              );
+
+              // A CLARIFY tied to a flow is a yes/no question — remember it.
+              if (decision.type === "CLARIFY" && decision.flow) {
+                await updateSession(from, {
+                  data: {
+                    ...session.data,
+                    pendingSwitch: { flow: decision.flow },
+                  },
+                });
+                return;
+              }
+
+              // Answering a question must never cost the user their place.
+              if (isInActiveFlow) {
+                if (flowState.rePrompt) {
+                  await sendWhatsApp(from, flowState.rePrompt, phone_number_id);
+                }
+              } else {
+                await sendMainMenu(from, phone_number_id);
+              }
+              return;
+            }
+
+            if (decision.type === "MENU") {
+              await sendMainMenu(from, phone_number_id);
+              return;
+            }
+
+            if (decision.type === "CANCEL") {
+              if (!isInActiveFlow) {
+                await sendWhatsApp(
+                  from,
+                  "👍 There's nothing running right now.",
                   phone_number_id,
                 );
                 await sendMainMenu(from, phone_number_id);
                 return;
               }
 
-              if (isNewFlowSignal) {
-                await sendWhatsApp(
-                  from,
-                  "Sure, let me take you there! 👇",
-                  phone_number_id,
-                );
-                await routeToFlow(
-                  escapeFlow,
-                  from,
-                  phone_number_id,
-                  freshSession.data,
-                );
-                return;
-              }
+              await updateSession(from, {
+                data: clearedFlowState(session.data),
+              });
+              await sendWhatsApp(
+                from,
+                "Okay, I've cancelled that for you. 👍",
+                phone_number_id,
+              );
+              await sendMainMenu(from, phone_number_id);
+              return;
             }
 
-            // For users NOT in an active flow → run full AI intent analysis
-            if (!isInActiveFlow) {
-              const aiAnalysis = await analyzeUserIntent(rawText, session.data);
-              console.log(
-                "AI Intent:",
-                aiAnalysis.intent,
-                "Flow:",
-                aiAnalysis.detectedFlow,
-              );
+            if (decision.type === "SWITCH_FLOW") {
+              if (!decision.flow) {
+                await sendMainMenu(from, phone_number_id);
+                return;
+              }
 
-              if (aiAnalysis.intent === "CHITCHAT_OR_CLARIFY") {
+              // Already in the flow they're asking for — re-show the step
+              // instead of restarting and losing their progress.
+              if (isInActiveFlow && flowState.flow === decision.flow) {
                 await sendWhatsApp(
                   from,
-                  aiAnalysis.replyMessage,
+                  flowState.rePrompt ||
+                    "You're already on it — please continue above 👆",
                   phone_number_id,
                 );
                 return;
               }
 
-              if (
-                aiAnalysis.intent === "CANCEL_FLOW" ||
-                aiAnalysis.intent === "START_SPECIFIC_FLOW"
-              ) {
-                const clearState = {
-                  ...session.data,
-                  pendingDeposit: false,
-                  awaitingDepositPin: false,
-                  awaitingDepositConfirmation: false,
-                  swap: null,
-                  send: null,
-                  withdraw: null,
-                  receive: null,
-                };
-                await updateSession(from, { data: clearState });
-                const freshSession = await getSession(from);
-
-                if (aiAnalysis.intent === "CANCEL_FLOW") {
-                  await sendWhatsApp(
-                    from,
-                    "Okay, I've cancelled that for you.",
-                    phone_number_id,
-                  );
-                  await sendMainMenu(from, phone_number_id);
-                  return;
-                }
-
-                await routeToFlow(
-                  aiAnalysis.detectedFlow,
+              // Money is one confirmation away. Never bin that silently.
+              if (isInActiveFlow && flowState.committed) {
+                await updateSession(from, {
+                  data: {
+                    ...session.data,
+                    pendingSwitch: { flow: decision.flow },
+                  },
+                });
+                await sendWhatsApp(
                   from,
+                  `⚠️ You have a ${humanFlowName(flowState.flow)} waiting to be completed.\n\n` +
+                    `Cancel it and start a ${humanFlowName(decision.flow)} instead? Reply *yes* or *no*.`,
                   phone_number_id,
-                  freshSession.data,
                 );
                 return;
               }
+
+              await startFlow(decision.flow, from, phone_number_id, {
+                ack: isInActiveFlow
+                  ? `Sure — cancelling that. Taking you to ${humanFlowName(decision.flow)} 👇`
+                  : null,
+              });
+              return;
+            }
+
+            // PROVIDE_INPUT falls through to the state machine below. Use the
+            // router's normalised value so "5k" and "₦20,000" reach the same
+            // parseFloat() calls as "5000" and "20000".
+            if (decision.type === "PROVIDE_INPUT" && decision.value && msg.text) {
+              msg.text.body = decision.value;
             }
 
             if (session.data?.pendingDeposit) {
@@ -2849,8 +2905,24 @@ router.post("/callback", async (req, res) => {
             //   await sendMainMenu(from, phone_number_id);
             //   return;
             // }
-            if (session.data?.authenticated && !isInActiveFlow) {
-              await sendMainMenu(from, phone_number_id);
+            // Nothing in the state machine above claimed this message.
+            if (session.data?.authenticated) {
+              if (isInActiveFlow) {
+                // Previously this fell through to the registration check,
+                // which flipped `awaitingPin` on and effectively logged the
+                // user out for typing during a selection step. Re-prompt in
+                // place instead.
+                await sendWhatsApp(
+                  from,
+                  "🤔 I didn't quite get that.",
+                  phone_number_id,
+                );
+                if (flowState.rePrompt) {
+                  await sendWhatsApp(from, flowState.rePrompt, phone_number_id);
+                }
+              } else {
+                await sendMainMenu(from, phone_number_id);
+              }
               return;
             }
 
@@ -4743,6 +4815,71 @@ async function sendWithdrawTypeMenu(to, phone_number_id) {
   );
 }
 
+/** Flow ids rendered for humans, for confirmations and acknowledgements. */
+const FLOW_LABELS = {
+  DEPOSIT: "deposit",
+  WITHDRAW: "withdrawal",
+  SWAP: "swap",
+  SEND: "transfer",
+  RECEIVE: "receive",
+  BALANCE: "balance check",
+  SUPPORT: "support",
+  CHANGE_PIN: "PIN change",
+  LOCK_WALLET: "wallet lock",
+  UNLOCK_WALLET: "wallet unlock",
+  SETTINGS: "settings",
+  LOGIN: "sign-in",
+};
+
+function humanFlowName(flow) {
+  return FLOW_LABELS[flow] || String(flow || "action").toLowerCase();
+}
+
+/**
+ * Clear any in-progress flow, acknowledge, and enter `flow`.
+ *
+ * Everything that starts a flow goes through here so that a failure inside
+ * routeToFlow can never leave the user staring at an unanswered message.
+ */
+async function startFlow(flow, from, phone_number_id, { ack } = {}) {
+  const current = await getSession(from);
+  await updateSession(from, { data: clearedFlowState(current.data) });
+  const fresh = await getSession(from);
+
+  if (ack) await sendWhatsApp(from, ack, phone_number_id);
+
+  await safeRouteToFlow(flow, from, phone_number_id, fresh.data);
+}
+
+/**
+ * routeToFlow, but a thrown error becomes a message the user can act on
+ * rather than silence. This is the guard that was missing when the swap
+ * currency lookup blew up mid-route.
+ */
+async function safeRouteToFlow(flow, from, phone_number_id, sessionData) {
+  try {
+    await routeToFlow(flow, from, phone_number_id, sessionData);
+  } catch (err) {
+    console.error(`routeToFlow(${flow}) failed:`, err);
+    logger.error?.("routeToFlow failed", { flow, error: err?.message });
+
+    // Don't strand the user inside a half-entered flow.
+    try {
+      const current = await getSession(from);
+      await updateSession(from, { data: clearedFlowState(current.data) });
+    } catch (cleanupErr) {
+      console.error("state cleanup failed:", cleanupErr);
+    }
+
+    await sendWhatsApp(
+      from,
+      `⚠️ Sorry, I couldn't open ${humanFlowName(flow)} just now. Please try again in a moment.`,
+      phone_number_id,
+    );
+    await sendMainMenu(from, phone_number_id);
+  }
+}
+
 async function routeToFlow(flow, from, phone_number_id, sessionData) {
   switch (flow) {
     case "DEPOSIT": {
@@ -4875,13 +5012,26 @@ async function routeToFlow(flow, from, phone_number_id, sessionData) {
       if (!currenciesRes.success) {
         await sendWhatsApp(
           from,
-          "⚠️ Unable to load swap currencies.",
+          "⚠️ Unable to load swap currencies right now. Please try again in a moment.",
           phone_number_id,
         );
         return;
       }
       const allCoins = currenciesRes?.data?.data?.currencies;
       const selectedCoins = pickPreferredCoins(allCoins, PREFERRED_COINS);
+
+      if (!selectedCoins.length) {
+        console.error(
+          "SWAP: no usable coins in response —",
+          JSON.stringify(currenciesRes?.data)?.slice(0, 500),
+        );
+        await sendWhatsApp(
+          from,
+          "⚠️ Swap isn't available right now. Please try again shortly.",
+          phone_number_id,
+        );
+        return;
+      }
 
       await updateSession(from, {
         data: {
@@ -5441,9 +5591,14 @@ async function triggerItemSelectionFlow(
 
 /* ------------- WA send helper (text + interactive) ------------- */
 async function sendWhatsApp(to, message, phone_number_id) {
-  console.log(
-    "got here but could not send message becacuse whatsapp token is missing",
-  );
+  // An empty/undefined body is a 400 from Meta and, before this guard, an
+  // exception that aborted the rest of the handler. Fail loudly in the log,
+  // quietly to the user.
+  if (message == null || (typeof message === "string" && !message.trim())) {
+    console.error("sendWhatsApp: refusing to send an empty message to", to);
+    return false;
+  }
+
   if (!WHATSAPP_TOKEN || !phone_number_id) {
     console.log(
       "[MOCK send] to:",
@@ -5452,7 +5607,7 @@ async function sendWhatsApp(to, message, phone_number_id) {
       "phone_number_id:",
       phone_number_id,
     );
-    return;
+    return false;
   }
 
   const url = `https://graph.facebook.com/${WHATSAPP_API_VERSION}/${phone_number_id}/messages`;
@@ -5467,19 +5622,30 @@ async function sendWhatsApp(to, message, phone_number_id) {
         }
       : { messaging_product: "whatsapp", to, ...message };
 
-  const res = await fetch(url, {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${WHATSAPP_TOKEN}`,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify(body),
-  });
+  try {
+    const res = await fetch(url, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${WHATSAPP_TOKEN}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(body),
+    });
 
-  if (!res.ok) {
-    const debugBody = await res.text();
-    console.error("sendWhatsApp failed:", res.status, debugBody);
-    throw new Error("sendWhatsApp failed");
+    if (!res.ok) {
+      const debugBody = await res.text();
+      console.error("sendWhatsApp failed:", res.status, debugBody);
+      logger.error?.("sendWhatsApp failed", { status: res.status, debugBody });
+      // Deliberately does NOT throw. One failed send used to abort every
+      // remaining step in the handler, which is how users ended up with a
+      // dangling "Sure, let me take you there!" and no follow-up.
+      return false;
+    }
+
+    return true;
+  } catch (err) {
+    console.error("sendWhatsApp threw:", err?.message || err);
+    return false;
   }
 }
 

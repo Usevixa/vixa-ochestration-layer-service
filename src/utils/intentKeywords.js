@@ -1,5 +1,39 @@
+/**
+ * Deterministic keyword layer for VIXA intent recognition.
+ *
+ * This is the FAST path. It handles the ~85% of messages that are an
+ * unambiguous single intent ("swap", "check my balance", "cancel") without
+ * paying for an LLM round-trip. Anything ambiguous — a cancel AND a flow in
+ * the same sentence, two competing flows, or nothing at all — is escalated to
+ * the model by src/ai/intentRouter.js.
+ *
+ * Matching rules (all three matter — the old version had none of them):
+ *   1. WORD BOUNDARIES. Plain `includes()` meant "back" matched "feedback"
+ *      and "give me my money back", silently cancelling live transactions.
+ *   2. SPECIFICITY WINS, not array order. "deposit address" (2 words) beats
+ *      "deposit" (1 word), so asking for a receiving address no longer dumps
+ *      the user into the NGN buy flow.
+ *   3. TIES BROKEN BY PRIORITY, not by whoever was declared first in the file.
+ */
+
+/** Higher priority wins when two phrases match with the same specificity. */
+const FLOW_PRIORITY = {
+  LOCK_WALLET: 100, // safety first — never lose a "my phone was stolen"
+  UNLOCK_WALLET: 95,
+  CHANGE_PIN: 90,
+  CANCEL: 80,
+  RECEIVE: 70,
+  WITHDRAW: 60,
+  SWAP: 55,
+  DEPOSIT: 50,
+  SEND: 45,
+  BALANCE: 40,
+  SUPPORT: 25,
+  SETTINGS: 20,
+};
+
 export const KEYWORD_INTENT_MAP = [
-  // CANCEL triggers — checked first
+  // CANCEL triggers
   {
     flow: "CANCEL",
     keywords: [
@@ -23,9 +57,7 @@ export const KEYWORD_INTENT_MAP = [
       "nevermind",
       "leave it",
       "leave am",
-      "i don't want",
       "i dont want",
-      "i don't want again",
       "i dont want again",
       "i no do again",
       "i no want again",
@@ -36,7 +68,6 @@ export const KEYWORD_INTENT_MAP = [
       "ignore that",
       "ignore this",
       "go back",
-      "back",
       "start over",
       "restart",
       "begin again",
@@ -50,7 +81,6 @@ export const KEYWORD_INTENT_MAP = [
       "no need again",
       "i no need am again",
       "make we stop",
-      "let's stop",
       "lets stop",
     ],
   },
@@ -127,9 +157,7 @@ export const KEYWORD_INTENT_MAP = [
       "forgot pin",
       "forgot my pin",
       "i forgot my pin",
-      "i can't remember my pin",
       "i cant remember my pin",
-      "i don't remember my pin",
       "i dont remember my pin",
       "lost my pin",
       "recover pin",
@@ -191,7 +219,6 @@ export const KEYWORD_INTENT_MAP = [
       "wallet blocked",
       "my wallet is blocked",
       "i cannot access my wallet",
-      "i can't access my wallet",
       "i cant access my wallet",
       "i cannot use my wallet",
       "wallet disabled",
@@ -233,11 +260,38 @@ export const KEYWORD_INTENT_MAP = [
     ],
   },
 
-  // WITHDRAW triggers — before SEND
+  // SUPPORT triggers
+  {
+    flow: "SUPPORT",
+    keywords: [
+      "support",
+      "customer support",
+      "customer care",
+      "customer service",
+      "contact support",
+      "contact vixa",
+      "talk to support",
+      "talk to a human",
+      "talk to an agent",
+      "speak to someone",
+      "i need help",
+      "help me please",
+      "report a problem",
+      "report an issue",
+      "complaint",
+      "make a complaint",
+      "my money is missing",
+      "my transaction failed",
+      "abeg i need help",
+    ],
+  },
+
+  // WITHDRAW triggers
   {
     flow: "WITHDRAW",
     keywords: [
       "withdraw",
+      "withdrawal",
       "withdraw money",
       "withdraw my money",
       "withdraw funds",
@@ -347,7 +401,6 @@ export const KEYWORD_INTENT_MAP = [
       "help me send usdt",
       "abeg send usdt",
       "i wan send usdt",
-      "transfer to",
     ],
   },
 
@@ -363,7 +416,6 @@ export const KEYWORD_INTENT_MAP = [
       "fund my account",
       "top up",
       "topup",
-      "top-up",
       "add money",
       "add funds",
       "put money",
@@ -425,6 +477,7 @@ export const KEYWORD_INTENT_MAP = [
       "wallet address",
       "my wallet address",
       "deposit address",
+      "my deposit address",
       "usdt address",
       "btc address",
       "eth address",
@@ -523,16 +576,135 @@ export const KEYWORD_INTENT_MAP = [
   },
 ];
 
-export function matchKeywordIntent(text) {
-  if (!text) return { flow: null, matched: false };
-  const lower = text.toLowerCase().trim();
+/** Every flow the router is allowed to return. Anything else is rejected. */
+export const KNOWN_FLOWS = [
+  "DEPOSIT",
+  "WITHDRAW",
+  "SWAP",
+  "SEND",
+  "RECEIVE",
+  "BALANCE",
+  "SUPPORT",
+  "CHANGE_PIN",
+  "LOCK_WALLET",
+  "UNLOCK_WALLET",
+  "SETTINGS",
+];
 
-  for (const entry of KEYWORD_INTENT_MAP) {
-    for (const kw of entry.keywords) {
-      if (lower.includes(kw)) {
-        return { flow: entry.flow, matched: true };
+/**
+ * Lowercase, drop apostrophes ("don't" -> "dont"), turn every other
+ * non-alphanumeric run into a single space, and pad with spaces so that
+ * ` ${phrase} ` matching is a true word-boundary test.
+ */
+export function normalizeText(text) {
+  if (!text) return " ";
+  const cleaned = String(text)
+    .toLowerCase()
+    .replace(/['’`]/g, "")
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim();
+  return ` ${cleaned} `;
+}
+
+/** Pre-normalize the phrase table once at module load, not on every message. */
+const COMPILED = KEYWORD_INTENT_MAP.map((entry) => ({
+  flow: entry.flow,
+  priority: FLOW_PRIORITY[entry.flow] ?? 0,
+  phrases: entry.keywords
+    .map((kw) => {
+      const normalized = normalizeText(kw);
+      return {
+        phrase: normalized,
+        // Specificity = word count. "deposit address" (2) beats "deposit" (1).
+        weight: normalized.trim().split(" ").filter(Boolean).length,
+      };
+    })
+    .sort((a, b) => b.weight - a.weight),
+}));
+
+/**
+ * Phrases that negate the intent that follows them. Used to tell
+ * "i dont want to deposit" (cancel) apart from "cancel that, i want to
+ * deposit" (switch) without an LLM call.
+ */
+const NEGATION_PHRASES = [
+  " i dont want ",
+  " i do not want ",
+  " i dont need ",
+  " i no want ",
+  " i no need ",
+  " not doing ",
+  " dont want to ",
+];
+
+/**
+ * Score a message against the whole phrase table.
+ *
+ * @returns {{
+ *   cancel: {flow:string, phrase:string, weight:number, at:number}|null,
+ *   flows: Array<{flow:string, phrase:string, weight:number, at:number, priority:number}>,
+ *   best: {flow:string}|null,
+ *   negated: boolean,
+ *   ambiguous: boolean,
+ * }}
+ */
+export function scoreKeywordIntents(text) {
+  const haystack = normalizeText(text);
+
+  const hitsByFlow = new Map();
+
+  for (const entry of COMPILED) {
+    for (const { phrase, weight } of entry.phrases) {
+      const at = haystack.indexOf(phrase);
+      if (at === -1) continue;
+
+      const existing = hitsByFlow.get(entry.flow);
+      // Keep only the most specific phrase per flow.
+      if (!existing || weight > existing.weight) {
+        hitsByFlow.set(entry.flow, {
+          flow: entry.flow,
+          phrase: phrase.trim(),
+          weight,
+          at,
+          priority: entry.priority,
+        });
       }
     }
   }
-  return { flow: null, matched: false };
+
+  const cancel = hitsByFlow.get("CANCEL") || null;
+  const flows = [...hitsByFlow.values()]
+    .filter((h) => h.flow !== "CANCEL")
+    .sort((a, b) => b.weight - a.weight || b.priority - a.priority);
+
+  const negated = NEGATION_PHRASES.some((p) => haystack.includes(p));
+
+  // Ambiguous = the deterministic layer should NOT decide alone.
+  //   - a cancel and a flow in one sentence ("scratch that, I want to swap")
+  //   - two flows too close to call ("swap and check my balance")
+  //
+  // A clear winner (2+ more words of specificity) is decided locally: that's
+  // what makes "give me my deposit address" resolve to RECEIVE without paying
+  // for a model call, even though "deposit" also matched.
+  const tooClose = flows.length > 1 && flows[0].weight - flows[1].weight < 2;
+
+  const ambiguous = Boolean((cancel && flows.length) || tooClose);
+
+  return {
+    cancel,
+    flows,
+    best: flows[0] || cancel || null,
+    negated,
+    ambiguous,
+  };
+}
+
+/**
+ * Back-compatible shim for the original API.
+ * Prefer scoreKeywordIntents() — this loses the ambiguity signal.
+ */
+export function matchKeywordIntent(text) {
+  const { best } = scoreKeywordIntents(text);
+  if (!best) return { flow: null, matched: false };
+  return { flow: best.flow, matched: true };
 }
