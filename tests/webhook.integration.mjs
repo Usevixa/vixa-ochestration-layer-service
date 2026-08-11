@@ -101,13 +101,15 @@ async function send(text, seed) {
   // outlast any guess, and a truncated window looks identical to real silence.
   let lastCount = -1;
   let quietFor = 0;
-  const deadline = Date.now() + 20_000;
+  const deadline = Date.now() + 40_000;
   while (Date.now() < deadline) {
     await new Promise((r) => setTimeout(r, 500));
     if (sent.length === lastCount) {
       quietFor += 500;
       if (quietFor >= 3000 && sent.length > 0) break;
-      if (quietFor >= 8000) break; // nothing ever arrived — genuine silence
+      // Must exceed INTENT_TIMEOUT_MS (6s) x maxRetries(1) plus overhead,
+      // or a slow OpenAI call is indistinguishable from genuine silence.
+      if (quietFor >= 20_000) break;
     } else {
       lastCount = sent.length;
       quietFor = 0;
