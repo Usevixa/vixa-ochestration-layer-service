@@ -49,6 +49,7 @@ import {
 import logger from "../lib/logger.js";
 
 import { decryptRequest, encryptResponse } from "../utils/decrypt.js";
+import { resolveCurrencies, readCoin, normalizeCoins } from "../utils/apiShape.js";
 
 const router = express.Router();
 
@@ -124,14 +125,16 @@ const PREFERRED_COINS = [
   "UNI",
 ];
 
-// NOTE: these used to assume `allCurrencies` was always an array. When the
-// upstream response shape drifted, `.find()` threw a TypeError that only the
-// route's outermost catch saw — so the user got "Sure, let me take you there!"
-// and then nothing at all. Guard the input instead.
+// NOTE: these used to assume `allCurrencies` was always an array, and that
+// every item keyed its ticker as `coin`. When either assumption failed,
+// `.find()` threw a TypeError that only the route's outermost catch saw — so
+// the user got "Sure, let me take you there!" and then nothing at all.
+// readCoin() tolerates the field-name variation; the callers resolve the list
+// itself via resolveCurrencies() so the real shape gets logged.
 function pickPreferredCoins(allCurrencies, preferredList) {
   if (!Array.isArray(allCurrencies)) return [];
   return preferredList
-    .map((symbol) => allCurrencies.find((c) => c?.coin === symbol))
+    .map((symbol) => allCurrencies.find((c) => readCoin(c) === symbol))
     .filter(Boolean); // pagination handles the 10-item limit now
 }
 
@@ -139,8 +142,50 @@ function pickPreferredToCoins(allCurrencies, preferredList, fromCoin) {
   if (!Array.isArray(allCurrencies)) return [];
   return preferredList
     .filter((symbol) => symbol !== fromCoin)
-    .map((symbol) => allCurrencies.find((c) => c?.coin === symbol))
+    .map((symbol) => allCurrencies.find((c) => readCoin(c) === symbol))
     .filter(Boolean); // pagination handles the 10-item limit now
+}
+
+/**
+ * Shared entry for every swap-currency lookup. There are three call sites
+ * (main menu, routeToFlow, and the to-coin step) that had drifted into
+ * near-duplicates with different guards; this keeps them honest.
+ *
+ * @returns {{ coins: any[], error: string|null }}
+ */
+async function loadSwapCoins(fromCoin) {
+  const res = await fetchSwapCurrencies();
+
+  if (!res.success) {
+    console.error("loadSwapCoins: API call failed —", JSON.stringify(res.error)?.slice(0, 300));
+    return { coins: [], error: "⚠️ Unable to load swap currencies right now. Please try again in a moment." };
+  }
+
+  const { list, reason } = resolveCurrencies(res.data, "swap/currencies");
+
+  if (reason) {
+    return { coins: [], error: "⚠️ Swap isn't available right now. Please try again shortly." };
+  }
+
+  // Normalise before filtering so downstream `c.coin` reads always work.
+  const normalized = normalizeCoins(list);
+
+  const coins = fromCoin
+    ? pickPreferredToCoins(normalized, PREFERRED_COINS, fromCoin)
+    : pickPreferredCoins(normalized, PREFERRED_COINS);
+
+  if (!coins.length) {
+    console.error(
+      `loadSwapCoins: ${list.length} currencies returned but none matched PREFERRED_COINS.`,
+      "available =",
+      list.map(readCoin).filter(Boolean).slice(0, 30).join(", "),
+      "| preferred =",
+      PREFERRED_COINS.join(", "),
+    );
+    return { coins: [], error: "⚠️ Swap isn't available right now. Please try again shortly." };
+  }
+
+  return { coins, error: null };
 }
 
 // function isFreeText(msg, session) {
@@ -857,15 +902,35 @@ router.post("/callback", async (req, res) => {
               const coinsRes = await fetchSendSupportedCurrencies();
 
               if (!coinsRes.success) {
+                // The reason was previously swallowed — log it so the next
+                // occurrence is diagnosable from Seq rather than a screenshot.
+                console.error(
+                  "SEND: /crypto/supported-currencies failed —",
+                  JSON.stringify(coinsRes.error)?.slice(0, 400),
+                );
                 await sendWhatsApp(
                   from,
-                  "⚠️ Unable to load supported coins.",
+                  "⚠️ Unable to load supported coins right now. Please try again shortly.",
                   phone_number_id,
                 );
                 return;
               }
 
-              const coins = coinsRes?.data?.data?.currencies || [];
+              const { list: rawCoins, reason: coinsReason } = resolveCurrencies(
+                coinsRes.data,
+                "crypto/supported-currencies",
+              );
+
+              const coins = normalizeCoins(rawCoins);
+
+              if (coinsReason || !coins.length) {
+                await sendWhatsApp(
+                  from,
+                  "⚠️ No coins are available to send right now. Please try again shortly.",
+                  phone_number_id,
+                );
+                return;
+              }
 
               const uniqueCoins = Array.from(
                 new Map(coins.map((c) => [c.coin, c])).values(),
@@ -1154,16 +1219,13 @@ router.post("/callback", async (req, res) => {
                   phone_number_id,
                 );
 
-                const coinsRes = await fetchSendSupportedCurrencies();
-
-                if (!coinsRes.success) {
-                  await sendWhatsApp(
-                    from,
-                    "⚠️ Unable to load supported coins.",
-                    phone_number_id,
-                  );
-                  break;
-                }
+                // NOTE: the coin lookup that used to live here was dead — every
+                // line that consumed it is commented out below, and the coins
+                // are actually loaded by the SEND_TYPE_P2P / SEND_TYPE_EXTERNAL
+                // handler once the user picks a recipient type. All it did was
+                // fire a pointless request and, when that request failed, emit
+                // a spurious "Unable to load supported coins" right after the
+                // recipient menu had rendered fine.
 
                 // const coins = coinsRes?.data?.data?.currencies || [];
 
@@ -1333,22 +1395,16 @@ router.post("/callback", async (req, res) => {
                 break;
 
               case "SWAP_CRYPTO": {
-                const currenciesRes = await fetchSwapCurrencies();
+                // This path previously had no empty-list guard, so a failed
+                // lookup sent an item-selection flow with zero rows — the
+                // blank "Coin" picker.
+                const { coins: selectedCoins, error: swapErr } =
+                  await loadSwapCoins();
 
-                if (!currenciesRes.success) {
-                  await sendWhatsApp(
-                    from,
-                    "⚠️ Unable to load swap currencies right now.",
-                    phone_number_id,
-                  );
+                if (swapErr) {
+                  await sendWhatsApp(from, swapErr, phone_number_id);
                   break;
                 }
-
-                const allCoins = currenciesRes?.data?.data?.currencies;
-                const selectedCoins = pickPreferredCoins(
-                  allCoins,
-                  PREFERRED_COINS,
-                );
 
                 await updateSession(from, {
                   data: {
@@ -2078,14 +2134,16 @@ router.post("/callback", async (req, res) => {
                 return;
               }
 
-              const currenciesRes = await fetchSwapCurrencies();
-              const allCoins = currenciesRes?.data?.data?.currencies;
               const fromCoin = session.data.swap.fromCoin;
-              const toCoins = pickPreferredToCoins(
-                allCoins,
-                PREFERRED_COINS,
-                fromCoin,
-              );
+              // This site had no success check at all: a failed lookup left
+              // toCoins empty and shipped an item picker with zero rows.
+              const { coins: toCoins, error: toErr } =
+                await loadSwapCoins(fromCoin);
+
+              if (toErr) {
+                await sendWhatsApp(from, toErr, phone_number_id);
+                return;
+              }
 
               await updateSession(from, {
                 data: {
@@ -5008,28 +5066,10 @@ async function routeToFlow(flow, from, phone_number_id, sessionData) {
       break;
     }
     case "SWAP": {
-      const currenciesRes = await fetchSwapCurrencies();
-      if (!currenciesRes.success) {
-        await sendWhatsApp(
-          from,
-          "⚠️ Unable to load swap currencies right now. Please try again in a moment.",
-          phone_number_id,
-        );
-        return;
-      }
-      const allCoins = currenciesRes?.data?.data?.currencies;
-      const selectedCoins = pickPreferredCoins(allCoins, PREFERRED_COINS);
+      const { coins: selectedCoins, error: swapErr } = await loadSwapCoins();
 
-      if (!selectedCoins.length) {
-        console.error(
-          "SWAP: no usable coins in response —",
-          JSON.stringify(currenciesRes?.data)?.slice(0, 500),
-        );
-        await sendWhatsApp(
-          from,
-          "⚠️ Swap isn't available right now. Please try again shortly.",
-          phone_number_id,
-        );
+      if (swapErr) {
+        await sendWhatsApp(from, swapErr, phone_number_id);
         return;
       }
 
