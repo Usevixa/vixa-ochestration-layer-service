@@ -51,6 +51,8 @@ import logger from "../lib/logger.js";
 import { decryptRequest, encryptResponse } from "../utils/decrypt.js";
 
 import { resolveCurrencies, readCoin, normalizeCoins } from "../utils/apiShape.js";
+import { verifyMetaSignature } from "../utils/verifySignature.js";
+import { markMessageSeen } from "../utils/messageDedup.js";
 
 
 
@@ -210,6 +212,17 @@ router.get("/callback", (req, res) => {
 
 /* ------------- main webhook for incoming WhatsApp events (FIXED FOR FLOW SUBMISSION) ------------- */
 router.post("/callback", async (req, res) => {
+  // Reject anything Meta did not sign, BEFORE acknowledging or processing.
+  // No-op until WHATSAPP_APP_SECRET is configured — see verifySignature.js.
+  const signature = verifyMetaSignature(req);
+  if (!signature.ok) {
+    console.error(
+      `Rejected unsigned webhook: ${signature.reason} (from ${req.ip})`,
+    );
+    logger.warn("webhook.rejected", { reason: signature.reason, ip: req.ip });
+    return res.sendStatus(403);
+  }
+
   console.log("webhook hit successfully");
   logger.info("Webhook hit");
   // Acknowledge immediately to Meta
@@ -239,6 +252,16 @@ router.post("/callback", async (req, res) => {
 
           const from = normalizePhone(rawFrom);
           if (!from) continue;
+
+          // Meta redelivers webhooks it did not get a prompt 200 for — which
+          // is every message that arrived while the container was down. Without
+          // this, each redelivery replays the whole handler and the user gets
+          // the same replies over and over, unprompted.
+          if (!markMessageSeen(msg.id)) {
+            console.log(`Duplicate message ${msg.id} from ${from} — skipping`);
+            logger.info("webhook.duplicate", { messageId: msg.id });
+            continue;
+          }
 
           // Store phone_number_id in session for later replies
           let session = await getSession(from);

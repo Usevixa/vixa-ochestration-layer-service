@@ -5,7 +5,17 @@ dotenv.config();
 import router from "./routes/webhook.js";
 
 const app = express();
-app.use(express.json());
+
+// Keep the raw bytes alongside the parsed body. Meta signs the exact bytes it
+// sent, so the HMAC cannot be recomputed from a re-serialised object — key
+// order and whitespace would differ. See src/utils/verifySignature.js.
+app.use(
+  express.json({
+    verify: (req, _res, buf) => {
+      req.rawBody = buf;
+    },
+  }),
+);
 
 // Mount the webhook route
 app.use("/", router);
