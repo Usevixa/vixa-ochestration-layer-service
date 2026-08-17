@@ -152,6 +152,10 @@ export async function checkPhoneNumber(phoneNumber) {
       "checkPhoneNumber ERROR:",
       err?.response?.data || err.message,
     );
-    throw err;
+    // Returns null rather than throwing. Both call sites in webhook.js already
+    // handle a null result with "Service momentarily unavailable"; the throw
+    // skipped past that into the route's outer catch, so a user signing in
+    // while the API was down got no reply at all.
+    return null;
   }
 }

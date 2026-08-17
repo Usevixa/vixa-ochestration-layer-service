@@ -4,7 +4,11 @@
   "main": "index.js",
   "type": "module",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1",
+    "test": "npm run test:intent && npm run test:shape && npm run test:security && npm run test:webhook",
+    "test:intent": "node tests/intent.unit.mjs",
+    "test:shape": "node tests/apiShape.unit.mjs",
+    "test:security": "node tests/webhookSecurity.unit.mjs",
+    "test:webhook": "node -r dotenv/config tests/webhook.integration.mjs",
     "dev": "nodemon src/index.js",
     "start": "node -r dotenv/config src/index.js"
   },

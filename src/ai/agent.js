@@ -111,14 +111,20 @@ Only respond in JSON.
     ],
   });
 
-  // MUST detect Responses API tool calls properly
-  const toolItem = response.output.find((o) => o.type === "tool_call");
+  // The Responses API emits output items of type "function_call", not
+  // "tool_call". Looking for the wrong type meant every tool call fell through
+  // to the message branch below and threw "Model did not return a message
+  // item" — so createUserOnboarding/verifyNIN could never actually fire.
+  const toolItem = response.output.find((o) => o.type === "function_call");
 
   if (toolItem) {
     return {
       type: "tool_call",
       tool: toolItem.name,
-      arguments: toolItem.arguments,
+      arguments:
+        typeof toolItem.arguments === "string"
+          ? JSON.parse(toolItem.arguments)
+          : toolItem.arguments,
       call_id: toolItem.call_id,
     };
   }
