@@ -19,7 +19,11 @@ import { fetchWalletBalances } from "../services/wallet.service.js";
 import { fetchReceiveWallets } from "../services/recieve.service.js";
 import { humanizeError } from "../services/ai.service.js";
 import { resolveIntent } from "../ai/intentRouter.js";
-import { describeFlowState, clearedFlowState } from "../ai/flowState.js";
+import {
+  describeFlowState,
+  clearedFlowState,
+  voiceAllowed,
+} from "../ai/flowState.js";
 import {
   fetchSwapCurrencies,
   fetchSwapQuote,
@@ -50,11 +54,19 @@ import logger from "../lib/logger.js";
 
 import { decryptRequest, encryptResponse } from "../utils/decrypt.js";
 
-import { resolveCurrencies, readCoin, normalizeCoins } from "../utils/apiShape.js";
+import {
+  resolveCurrencies,
+  readCoin,
+  normalizeCoins,
+} from "../utils/apiShape.js";
 import { verifyMetaSignature } from "../utils/verifySignature.js";
 import { markMessageSeen } from "../utils/messageDedup.js";
-
-
+import {
+  downloadWhatsAppMedia,
+  SLOW_TRANSCRIBE_BYTES,
+} from "../utils/whatsappMedia.js";
+import { transcribeAudio } from "../services/transcription.service.js";
+import { normalizeSpokenText } from "../utils/spokenNumbers.js";
 
 const router = express.Router();
 
@@ -162,14 +174,24 @@ async function loadSwapCoins(fromCoin) {
   const res = await fetchSwapCurrencies();
 
   if (!res.success) {
-    console.error("loadSwapCoins: API call failed —", JSON.stringify(res.error)?.slice(0, 300));
-    return { coins: [], error: "⚠️ Unable to load swap currencies right now. Please try again in a moment." };
+    console.error(
+      "loadSwapCoins: API call failed —",
+      JSON.stringify(res.error)?.slice(0, 300),
+    );
+    return {
+      coins: [],
+      error:
+        "⚠️ Unable to load swap currencies right now. Please try again in a moment.",
+    };
   }
 
   const { list, reason } = resolveCurrencies(res.data, "swap/currencies");
 
   if (reason) {
-    return { coins: [], error: "⚠️ Swap isn't available right now. Please try again shortly." };
+    return {
+      coins: [],
+      error: "⚠️ Swap isn't available right now. Please try again shortly.",
+    };
   }
 
   // Normalise before filtering so downstream `c.coin` reads always work.
@@ -187,7 +209,10 @@ async function loadSwapCoins(fromCoin) {
       "| preferred =",
       PREFERRED_COINS.join(", "),
     );
-    return { coins: [], error: "⚠️ Swap isn't available right now. Please try again shortly." };
+    return {
+      coins: [],
+      error: "⚠️ Swap isn't available right now. Please try again shortly.",
+    };
   }
 
   return { coins, error: null };
@@ -271,6 +296,104 @@ router.post("/callback", async (req, res) => {
 
           restoreCachedToken(session.data);
           session = await getSession(from);
+
+          // ── VOICE NOTES ────────────────────────────────────────────
+          // Transcribe and rewrite into a text message so the entire
+          // state machine below runs unchanged.
+          if (msg.type === "audio" || msg.type === "voice") {
+            if (!session.data?.authenticated) {
+              await sendWhatsApp(
+                from,
+                "👋 Please sign in first — send me a text message to get started.",
+                phone_number_id,
+              );
+              continue;
+            }
+
+            const preState = describeFlowState(session.data);
+
+            if (process.env.VIXA_VOICE_ENABLED === "false") {
+              await sendWhatsApp(
+                from,
+                "🎤 Voice notes aren't available right now — please type your message.",
+                phone_number_id,
+              );
+              continue;
+            }
+
+            // STATE CHECK FIRST — before any bytes leave this process. A
+            // user who speaks their PIN must not have it uploaded for
+            // transcription.
+            if (!voiceAllowed(preState)) {
+              await sendWhatsApp(
+                from,
+                preState.sealed
+                  ? "🔒 For your security I can't accept voice notes here — please type it in."
+                  : "🔒 This one needs to be typed so we get it exactly right.",
+                phone_number_id,
+              );
+              if (preState.rePrompt) {
+                await sendWhatsApp(from, preState.rePrompt, phone_number_id);
+              }
+              logger.info("voice.refused", {
+                messageId: msg.id,
+                flow: preState.flow,
+                step: preState.step,
+                sealed: preState.sealed,
+              });
+              continue;
+            }
+
+            const mediaId = msg.audio?.id || msg.voice?.id;
+            const media = await downloadWhatsAppMedia(mediaId);
+
+            if (!media) {
+              await sendWhatsApp(
+                from,
+                "⚠️ I couldn't open that voice note. Please try again, or type your message.",
+                phone_number_id,
+              );
+              continue;
+            }
+
+            // duration isn't in Meta's payload; file size is the proxy.
+            if (media.fileSize > SLOW_TRANSCRIBE_BYTES) {
+              await sendWhatsApp(
+                from,
+                "🎧 One sec, listening...",
+                phone_number_id,
+              );
+            }
+
+            const t = await transcribeAudio(media);
+
+            if (!t.success) {
+              await sendWhatsApp(
+                from,
+                "🎧 Sorry, I couldn't make that out. Please try again, or type it.",
+                phone_number_id,
+              );
+              logger.warn?.("voice.failed", {
+                messageId: msg.id,
+                reason: t.reason,
+              });
+              continue;
+            }
+
+            const spoken = normalizeSpokenText(t.text);
+            console.log(`[voice] ${from}: "${t.text}" → "${spoken}"`);
+            logger.info("voice.transcribed", {
+              messageId: msg.id,
+              flow: preState.flow,
+              step: preState.step,
+              chars: spoken.length,
+            });
+
+            // Rewrite. Everything downstream is untouched.
+            msg.type = "text";
+            msg.text = { body: spoken };
+            msg._fromVoice = true;
+          }
 
           const isFlowReply =
             msg.type === "interactive" && msg.interactive?.type === "nfm_reply";
@@ -377,37 +500,6 @@ router.post("/callback", async (req, res) => {
             const actionId = msg.interactive.list_reply.id;
 
             console.log("Menu selection:", actionId);
-
-            // ✅ ADD THIS NEW BLOCK FOR DEPOSIT CONFIRMATION
-            if (actionId === "CONFIRM_DEPOSIT_PAYMENT") {
-              const confirmDeposit = await confirmPayment({
-                id: session.data.id,
-              });
-              console.log(confirmDeposit, "confirmDeposit.data");
-
-              await sendWhatsApp(
-                from,
-                `✅ Your deposit is currently being processed in the background.\n\nYou’ll receive a notification on WhatsApp (and email, if available) once it’s completed.\n\nThanks for using VIXA 🚀`,
-                phone_number_id,
-              );
-
-              // Reset the awaiting confirmation state so it doesn't trigger again
-              await updateSession(from, {
-                data: {
-                  ...session.data,
-                  awaitingDepositConfirmation: false,
-                },
-              });
-
-              await sendWhatsApp(
-                from,
-                "What would you like to do next?",
-                phone_number_id,
-              );
-
-              await sendMainMenu(from, phone_number_id);
-              return;
-            }
 
             // SWAP FROM pagination
             if (actionId.startsWith("SWAP_FROM_PAGE_")) {
@@ -1591,6 +1683,47 @@ router.post("/callback", async (req, res) => {
           ) {
             const actionId = msg.interactive.button_reply.id;
 
+            // "Have Paid" is sent as an interactive *button* (see the DEPOSIT
+            // PIN handler), so it arrives here — it used to be handled only in
+            // the list_reply block above, where it could never match, and the
+            // tap did nothing at all.
+            if (actionId === "CONFIRM_DEPOSIT_PAYMENT") {
+              const confirmDeposit = await confirmPayment({
+                id: session.data.id,
+              });
+              console.log(confirmDeposit, "confirmDeposit.data");
+
+              await sendWhatsApp(
+                from,
+                `✅ Your deposit is currently being processed in the background.\n\nYou’ll receive a notification on WhatsApp (and email, if available) once it’s completed.\n\nThanks for using VIXA 🚀`,
+                phone_number_id,
+              );
+
+              // Reset the awaiting confirmation state so it doesn't trigger again
+              await updateSession(from, {
+                data: {
+                  ...session.data,
+                  awaitingDepositConfirmation: false,
+                },
+              });
+
+              await sendWhatsApp(
+                from,
+                "What would you like to do next?",
+                phone_number_id,
+              );
+
+              await sendMainMenu(from, phone_number_id);
+              return;
+            }
+
+            // The "Try Again" button on a rejected/failed NIN had no handler,
+            // so it was inert — re-open the NIN flow.
+            if (actionId === "NIN_RETRY") {
+              await triggerNINFlow(from, phone_number_id);
+              return;
+            }
+
             // 🆕 REGION BUTTON REPLIES
             if (actionId === "WITHDRAW_REGION_NG") {
               // await sendWhatsApp(
@@ -1644,7 +1777,8 @@ router.post("/callback", async (req, res) => {
                 return;
               }
 
-              // Save full list so the completion handler can look up the country name
+              // countriesList feeds the WITHDRAW_COUNTRY_* handler; currentPage
+              // drives the "See More" pages of sendPaginatedCountriesMenu.
               await updateSession(from, {
                 data: {
                   ...session.data,
@@ -1652,14 +1786,21 @@ router.post("/callback", async (req, res) => {
                     ...session.data.withdraw,
                     step: "SELECT_COUNTRY",
                     countriesList: countriesRes.data,
+                    currentPage: 0,
                   },
                 },
               });
 
-              await triggerCountrySelectionFlow(
+              // NOTE: this used to call triggerCountrySelectionFlow. The Flow
+              // published behind COUNTRY_SELECTION_FLOW_ID is still Meta's
+              // default WELCOME_SCREEN template, so every send came back
+              // #131009 ("SELECT_COUNTRY is not allowed as first screen") and
+              // the user got nothing at all. The list menu needs no Flow.
+              await sendPaginatedCountriesMenu(
                 from,
                 phone_number_id,
                 countriesRes.data,
+                0,
               );
               return;
             }
@@ -1729,12 +1870,29 @@ router.post("/callback", async (req, res) => {
                   withdraw: {
                     ...session.data.withdraw,
                     banks: allBanks,
+                    currentBankPage: 0,
                     step: "SELECT_BANK",
                   },
                 },
               });
 
-              await triggerBankSelectionFlow(from, phone_number_id, allBanks);
+              const bankFlowSent = await triggerBankSelectionFlow(
+                from,
+                phone_number_id,
+                allBanks,
+              );
+
+              // If Meta rejects the Flow send — the failure mode that took the
+              // country picker down — fall back to the list menu rather than
+              // leaving the user with no reply.
+              if (!bankFlowSent) {
+                await sendPaginatedBanksMenu(
+                  from,
+                  phone_number_id,
+                  allBanks,
+                  0,
+                );
+              }
               return;
             }
 
@@ -1772,7 +1930,7 @@ router.post("/callback", async (req, res) => {
 
             console.log(session, " store house");
 
-            const rawText = msg.text?.body?.trim();
+            let rawText = msg.text?.body?.trim();
 
             // ==========================================
             // 1. THE AUTHENTICATION & ONBOARDING GATE
@@ -1904,7 +2062,11 @@ router.post("/callback", async (req, res) => {
               });
               session = await getSession(from);
 
-              if (/^(y|yes|yeah|yea|yep|ok|okay|sure|go ahead|proceed|do it)$/.test(answer)) {
+              if (
+                /^(y|yes|yeah|yea|yep|ok|okay|sure|go ahead|proceed|do it)$/.test(
+                  answer,
+                )
+              ) {
                 await startFlow(pending.flow, from, phone_number_id, {
                   ack: `👍 Cancelled. Taking you to ${humanFlowName(pending.flow)} 👇`,
                 });
@@ -1924,6 +2086,41 @@ router.post("/callback", async (req, res) => {
               }
               // Anything else: don't trap them in a yes/no loop — fall
               // through and interpret the message normally.
+            }
+
+            // ── Confirming an amount we heard in a voice note ──
+            if (session.data?.pendingVoiceAmount) {
+              const pending = session.data.pendingVoiceAmount;
+              const answer = (rawText || "").toLowerCase();
+
+              await updateSession(from, {
+                data: { ...session.data, pendingVoiceAmount: null },
+              });
+              session = await getSession(from);
+
+              if (
+                /^(y|yes|yeah|yea|yep|ok|okay|sure|correct|that's right|go ahead)$/.test(
+                  answer,
+                )
+              ) {
+                // Fall through with the confirmed value. rawText must move
+                // too, or resolveIntent below still classifies "yes".
+                msg.text.body = pending.value;
+                rawText = pending.value;
+                // Already confirmed — must not re-enter the echo gate.
+                msg._fromVoice = false;
+              } else if (/^(n|no|nope|nah|wrong|not right)$/.test(answer)) {
+                await sendWhatsApp(
+                  from,
+                  "👍 No problem — please type the amount instead.",
+                  phone_number_id,
+                );
+                if (flowState.rePrompt) {
+                  await sendWhatsApp(from, flowState.rePrompt, phone_number_id);
+                }
+                return;
+              }
+              // Anything else: not a yes/no — interpret it normally.
             }
 
             const decision = await resolveIntent({
@@ -2057,7 +2254,27 @@ router.post("/callback", async (req, res) => {
             // PROVIDE_INPUT falls through to the state machine below. Use the
             // router's normalised value so "5k" and "₦20,000" reach the same
             // parseFloat() calls as "5000" and "20000".
-            if (decision.type === "PROVIDE_INPUT" && decision.value && msg.text) {
+            if (
+              decision.type === "PROVIDE_INPUT" &&
+              decision.value &&
+              msg.text
+            ) {
+              // A misheard amount is silent and expensive — "fifty" heard as
+              // "fifteen" on a withdrawal. Confirm before acting.
+              if (msg._fromVoice && flowState.expecting === "amount") {
+                await updateSession(from, {
+                  data: {
+                    ...session.data,
+                    pendingVoiceAmount: { value: decision.value },
+                  },
+                });
+                await sendWhatsApp(
+                  from,
+                  `I heard: *${Number(decision.value).toLocaleString("en-NG")}*.\n\nReply *yes* to continue, or *no* to type it again.`,
+                  phone_number_id,
+                );
+                return;
+              }
               msg.text.body = decision.value;
             }
 
@@ -5332,7 +5549,12 @@ async function triggerFlow(toPhone, phone_number_id) {
     interactive: {
       type: "flow",
       body: {
-        text: "👋 Welcome to VIXA. Tap below to continue onboarding.",
+        text:
+          "Welcome to VIXA 👋\n\n" +
+          "Your money can now move from WhatsApp.\n\n" +
+          "Buy, sell & swap crypto. Convert USDT to local currency at great rates. Send money across 19 African countries.\n\n" +
+          "No extra app to learn — just tell VIXA what you want to do.\n\n" +
+          "Ready to unlock VIXA?",
       },
       action: {
         name: "flow",
@@ -5492,6 +5714,11 @@ async function triggerBVNFlow(toPhone, phone_number_id) {
 }
 
 async function triggerBankSelectionFlow(toPhone, phone_number_id, banks) {
+  if (!WHATSAPP_TOKEN || !phone_number_id) {
+    console.log("[MOCK BANK FLOW] to:", toPhone);
+    return false;
+  }
+
   const url = `https://graph.facebook.com/${WHATSAPP_API_VERSION}/${phone_number_id}/messages`;
 
   const bankOptions = banks.map((b) => ({
@@ -5535,8 +5762,15 @@ async function triggerBankSelectionFlow(toPhone, phone_number_id, banks) {
   if (!res.ok) {
     const debug = await res.text();
     console.error("triggerBankSelectionFlow failed:", res.status, debug);
+    logger.error?.("flow send rejected", {
+      flow: "BANK_SELECT",
+      status: res.status,
+      debug,
+    });
+    return false;
   }
   console.log("triggerBankSelectionFlow sent to", toPhone);
+  return true;
 }
 
 async function triggerCountrySelectionFlow(
@@ -5544,6 +5778,11 @@ async function triggerCountrySelectionFlow(
   phone_number_id,
   countries,
 ) {
+  if (!WHATSAPP_TOKEN || !phone_number_id) {
+    console.log("[MOCK COUNTRY FLOW] to:", toPhone);
+    return false;
+  }
+
   const url = `https://graph.facebook.com/${WHATSAPP_API_VERSION}/${phone_number_id}/messages`;
 
   const countryOptions = countries.map((c) => ({
@@ -5587,8 +5826,15 @@ async function triggerCountrySelectionFlow(
   if (!res.ok) {
     const debug = await res.text();
     console.error("triggerCountrySelectionFlow failed:", res.status, debug);
+    logger.error?.("flow send rejected", {
+      flow: "COUNTRY_SELECT",
+      status: res.status,
+      debug,
+    });
+    return false;
   }
   console.log("triggerCountrySelectionFlow sent to", toPhone);
+  return true;
 }
 
 /**
@@ -5603,7 +5849,7 @@ async function triggerItemSelectionFlow(
 ) {
   if (!WHATSAPP_TOKEN || !phone_number_id) {
     console.log("[MOCK ITEM FLOW] to:", toPhone, "context:", context);
-    return;
+    return false;
   }
 
   const url = `https://graph.facebook.com/${WHATSAPP_API_VERSION}/${phone_number_id}/messages`;
@@ -5651,8 +5897,16 @@ async function triggerItemSelectionFlow(
   if (!res.ok) {
     const debug = await res.text();
     console.error("triggerItemSelectionFlow failed:", res.status, debug);
+    logger.error?.("flow send rejected", {
+      flow: "ITEM_SELECT",
+      context,
+      status: res.status,
+      debug,
+    });
+    return false;
   }
   console.log("triggerItemSelectionFlow sent to", toPhone, "context:", context);
+  return true;
 }
 
 /* ------------- WA send helper (text + interactive) ------------- */
