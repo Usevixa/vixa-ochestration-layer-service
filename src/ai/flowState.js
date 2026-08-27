@@ -399,5 +399,29 @@ export function clearedFlowState(sessionData) {
     unlockWallet: null,
     changePin: null,
     pendingSwitch: null,
+    pendingVoiceAmount: null,
   };
+}
+
+/**
+ * Steps where a voice note must be refused.
+ *
+ *   pin / otp      — sealed. resolveIntent guarantees these never reach
+ *                    OpenAI; transcribing first would break that guarantee
+ *                    before the router ever runs.
+ *   address / tag  — one wrong character sends funds nowhere, permanently.
+ *   account_number — "8"/"H" and "5"/"9" are the classic confusions.
+ *   account_name   — sits in FREE_TEXT_EXPECTATIONS, so it is passed through
+ *                    unvalidated and handed straight to executeWithdrawal.
+ *
+ * Keyed on `expecting`, not step name, so new steps inherit the policy.
+ */
+export const VOICE_BLOCKED_EXPECTATIONS = new Set([
+  "pin", "otp", "address", "tag", "account_number", "account_name",
+]);
+
+export function voiceAllowed(state) {
+  if (!state) return true;
+  if (state.sealed) return false;
+  return !VOICE_BLOCKED_EXPECTATIONS.has(state.expecting);
 }
