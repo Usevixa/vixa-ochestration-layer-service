@@ -205,8 +205,22 @@ export async function resolveIntent({ text, sessionData, profile }) {
 
   // ── 0. Sealed states: secrets never reach the model ──────────────
   if (state.sealed) {
-    // A PIN/OTP shaped message is the answer. Nothing else to decide.
+    // OTPs are typed and have handlers in the state machine. PINs are NOT —
+    // they come back through the PIN Flow (processFlowCompletion), so a typed
+    // PIN has nothing to claim it and used to fall all the way through to
+    // "I didn't quite get that", trapping the user in a loop with their PIN
+    // sitting in plaintext in the chat.
     if (/^\d{4,8}$/.test(raw)) {
+      if (state.expecting === "pin") {
+        return withState(
+          decision({
+            type: "ANSWER",
+            reply:
+              "🔒 For your security, please use the *Enter PIN* button above rather than typing it here.\n\nI'd also delete that message from this chat.",
+            source: "sealed",
+          }),
+        );
+      }
       return withState(
         decision({ type: "PROVIDE_INPUT", value: raw, source: "sealed" }),
       );

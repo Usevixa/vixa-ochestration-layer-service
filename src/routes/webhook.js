@@ -332,15 +332,13 @@ router.post("/callback", async (req, res) => {
                   : "🔒 This one needs to be typed so we get it exactly right.",
                 phone_number_id,
               );
-              if (preState.rePrompt) {
-                await sendWhatsApp(from, preState.rePrompt, phone_number_id);
-              }
-              logger.info("voice.refused", {
-                messageId: msg.id,
-                flow: preState.flow,
-                step: preState.step,
-                sealed: preState.sealed,
-              });
+              await rePromptCurrentStep(from, phone_number_id, preState);
+              // logger.info("voice.refused", {
+              //   messageId: msg.id,
+              //   flow: preState.flow,
+              //   step: preState.step,
+              //   sealed: preState.sealed,
+              // });
               continue;
             }
 
@@ -1938,22 +1936,24 @@ router.post("/callback", async (req, res) => {
             // ==========================================
 
             // A. Is the user currently trying to log in?
+            //
+            // A typed PIN is never accepted — not here, not anywhere. This
+            // used to hand rawText straight to handleAuthenticationGate,
+            // which called loginUser() with it, so the login PIN was the one
+            // PIN in the app that still worked in plaintext. The real login
+            // happens in handlePinFlowSubmission's LOGIN case, after the
+            // Flow comes back. Re-open that Flow instead.
             if (session.data?.awaitingPin) {
-              const authResult = await handleAuthenticationGate({
-                from,
-                phone_number_id,
-                msgText: rawText,
-              });
+              const loginState = describeFlowState(session.data);
 
-              if (authResult.status === "SUCCESS") {
-                await sendWhatsApp(
-                  from,
-                  `Welcome back ${authResult.me.firstName} 👋`,
-                  phone_number_id,
-                );
-                await sendMainMenu(from, phone_number_id);
-              }
-              // Stop processing. The user is either logged in now, or failed the PIN check.
+              await sendWhatsApp(
+                from,
+                /^\d{4,8}$/.test(rawText || "")
+                  ? "🔒 For your security, please use the *Enter PIN* button rather than typing it here.\n\nI'd also delete that message from this chat."
+                  : "🔐 Please use the *Enter PIN* button below to sign in.",
+                phone_number_id,
+              );
+              await rePromptCurrentStep(from, phone_number_id, loginState);
               return;
             }
 
@@ -2079,9 +2079,7 @@ router.post("/callback", async (req, res) => {
                   "👍 No problem — let's finish what you started.",
                   phone_number_id,
                 );
-                if (flowState.rePrompt) {
-                  await sendWhatsApp(from, flowState.rePrompt, phone_number_id);
-                }
+                await rePromptCurrentStep(from, phone_number_id, flowState);
                 return;
               }
               // Anything else: don't trap them in a yes/no loop — fall
@@ -2115,9 +2113,7 @@ router.post("/callback", async (req, res) => {
                   "👍 No problem — please type the amount instead.",
                   phone_number_id,
                 );
-                if (flowState.rePrompt) {
-                  await sendWhatsApp(from, flowState.rePrompt, phone_number_id);
-                }
+                await rePromptCurrentStep(from, phone_number_id, flowState);
                 return;
               }
               // Anything else: not a yes/no — interpret it normally.
@@ -2171,9 +2167,7 @@ router.post("/callback", async (req, res) => {
 
               // Answering a question must never cost the user their place.
               if (isInActiveFlow) {
-                if (flowState.rePrompt) {
-                  await sendWhatsApp(from, flowState.rePrompt, phone_number_id);
-                }
+                await rePromptCurrentStep(from, phone_number_id, flowState);
               } else {
                 await sendMainMenu(from, phone_number_id);
               }
@@ -2217,12 +2211,15 @@ router.post("/callback", async (req, res) => {
               // Already in the flow they're asking for — re-show the step
               // instead of restarting and losing their progress.
               if (isInActiveFlow && flowState.flow === decision.flow) {
-                await sendWhatsApp(
-                  from,
-                  flowState.rePrompt ||
+                if (flowState.rePrompt) {
+                  await rePromptCurrentStep(from, phone_number_id, flowState);
+                } else {
+                  await sendWhatsApp(
+                    from,
                     "You're already on it — please continue above 👆",
-                  phone_number_id,
-                );
+                    phone_number_id,
+                  );
+                }
                 return;
               }
 
@@ -3218,33 +3215,10 @@ router.post("/callback", async (req, res) => {
                   "🤔 I didn't quite get that.",
                   phone_number_id,
                 );
-                if (flowState.rePrompt) {
-                  await sendWhatsApp(from, flowState.rePrompt, phone_number_id);
-                }
+                await rePromptCurrentStep(from, phone_number_id, flowState);
               } else {
                 await sendMainMenu(from, phone_number_id);
               }
-              return;
-            }
-
-            if (session.data?.awaitingPin) {
-              const authResult = await handleAuthenticationGate({
-                from,
-                phone_number_id,
-                msgText: msg.text?.body?.trim(),
-              });
-
-              // If auth succeeded, show menu
-              if (authResult.status === "SUCCESS") {
-                await sendWhatsApp(
-                  from,
-                  `Welcome back ${authResult.me.firstName} 👋`,
-                  phone_number_id,
-                );
-                await sendMainMenu(from, phone_number_id);
-              }
-              // If wrong/invalid/requested PIN, `handleAuthenticationGate`
-              // has already sent the appropriate reply message.
               return;
             }
 
@@ -3909,106 +3883,7 @@ router.post("/flow/callback", async (req, res) => {
   }
 });
 
-async function handleAuthenticationGate({ from, phone_number_id, msgText }) {
-  const session = await getSession(from);
 
-  // Ask for PIN if not already asked
-  if (!session?.data?.awaitingPin) {
-    // await updateSession(from, {
-    //   data: {
-    //     awaitingPin: true,
-    //     pinAttempts: 0,
-    //     authenticated: false, // Strictly enforce logged out state
-    //   },
-    // });
-    const freshSession = await getSession(from);
-    await updateSession(from, {
-      data: {
-        ...freshSession.data,
-        awaitingPin: false,
-        authenticated: true,
-        pinAttempts: 0,
-      },
-    });
-
-    // await sendWhatsApp(
-    //   from,
-    //   "🔐 Please enter your *4-digit PIN* to continue.",
-    //   phone_number_id,
-    // );
-    await triggerPinFlow(from, phone_number_id, "LOGIN");
-
-    return { status: "PIN_REQUESTED" };
-  }
-
-  // User is replying with PIN
-  const pin = msgText?.trim();
-
-  if (!pin || pin.length < 4) {
-    await sendWhatsApp(from, "⚠️ Please enter a valid PIN.", phone_number_id);
-    return { status: "INVALID_PIN" };
-  }
-
-  try {
-    // 1. Attempt login (This caches the token)
-    await loginUser({ phoneNumber: from, pin });
-
-    // 2. Try fetching profile (This proves the token actually works)
-    const me = await fetchAuthMe();
-
-    if (!me) {
-      throw new Error("ME_NOT_FOUND");
-    }
-
-    // 3. FULL SUCCESS 🎉 -> Now we safely declare them logged in
-    await updateSession(from, {
-      data: {
-        awaitingPin: false,
-        authenticated: true, // ✅ Safe to mark true now
-        pinAttempts: 0,
-      },
-    });
-
-    return { status: "SUCCESS", me };
-  } catch (err) {
-    const message = err?.message?.toLowerCase() || "";
-
-    // User not found → onboarding
-    if (
-      message.includes("not found") ||
-      message.includes("user") ||
-      message === "me_not_found"
-    ) {
-      await updateSession(from, {
-        data: {
-          awaitingPin: false,
-          authenticated: false,
-        },
-      });
-
-      return { status: "ONBOARDING_REQUIRED" };
-    }
-
-    // Wrong PIN or API Failure (401)
-    const attempts = (session.data?.pinAttempts || 0) + 1;
-
-    await updateSession(from, {
-      data: {
-        pinAttempts: attempts,
-        awaitingPin: true, // MUST stay true so they can try again
-        authenticated: false, // MUST stay false
-      },
-    });
-
-    await sendWhatsApp(
-      from,
-      "❌ Incorrect PIN or login failed. Please try again.",
-      phone_number_id,
-    );
-    await triggerPinFlow(from, phone_number_id, "LOGIN");
-    return { status: "WRONG_PIN" };
-  }
-}
 
 async function handlePinFlowSubmission({
   phone,
@@ -4021,9 +3896,26 @@ async function handlePinFlowSubmission({
   if (!pin || pin.length < 4) {
     await sendWhatsApp(
       phone,
-      "⚠️ Invalid PIN. Please try again.",
+      "⚠️ That PIN didn't look right. Please try again.",
       phone_number_id,
     );
+    // Never leave a PIN retry as plain text — reopen the same Flow, in
+    // whatever context the user was already in.
+    try {
+      await triggerPinFlow(
+        phone,
+        phone_number_id,
+        pinContext || "LOGIN",
+        "🔐 Please enter your PIN again:",
+      );
+    } catch (err) {
+      console.error("PIN re-prompt failed:", err?.message || err);
+      await sendWhatsApp(
+        phone,
+        "⚠️ I couldn't open the PIN screen. Please type *menu* and try again.",
+        phone_number_id,
+      );
+    }
     return;
   }
 
@@ -5134,6 +5026,47 @@ const FLOW_LABELS = {
 
 function humanFlowName(flow) {
   return FLOW_LABELS[flow] || String(flow || "action").toLowerCase();
+}
+
+/**
+ * Re-show whatever the current step is waiting for.
+ *
+ * PIN steps are NOT typed in VIXA — they come back through the PIN Flow, and
+ * there is no text handler for them. Sending the rePrompt string alone paints
+ * an instruction with no Flow button, so the user types their PIN into the
+ * chat, nothing claims it, and they loop on "I didn't quite get that".
+ */
+async function rePromptCurrentStep(from, phone_number_id, flowState) {
+  if (!flowState?.active) return;
+
+  if (flowState.expecting === "pin" && flowState.pinContext) {
+    try {
+      await triggerPinFlow(
+        from,
+        phone_number_id,
+        flowState.pinContext,
+        flowState.rePrompt,
+      );
+      return;
+    } catch (err) {
+      // triggerPinFlow throws where sendWhatsApp doesn't. Don't leave the
+      // user staring at silence.
+      console.error(
+        "rePromptCurrentStep: triggerPinFlow failed:",
+        err?.message || err,
+      );
+      await sendWhatsApp(
+        from,
+        "⚠️ I couldn't open the PIN screen. Please type *menu* and try again.",
+        phone_number_id,
+      );
+      return;
+    }
+  }
+
+  if (flowState.rePrompt) {
+    await sendWhatsApp(from, flowState.rePrompt, phone_number_id);
+  }
 }
 
 /**
