@@ -43,13 +43,32 @@ const DECISION_TYPES = [
 const FREE_TEXT_EXPECTATIONS = new Set(["text", "account_name", "tag"]);
 
 /** Only these end a sealed step. Everything else gets a canned nudge. */
-const HARD_CANCEL = /^(cancel|stop|abort|quit|exit|forget it|nevermind|never mind)$/;
+const HARD_CANCEL =
+  /^(cancel|stop|abort|quit|exit|forget it|nevermind|never mind)$/;
 
 const MENU_REQUEST = /^(menu|main menu|options|home|start|hi|hello|hey)$/;
 
 const COIN_SYMBOLS = [
-  "BTC", "ETH", "USDT", "USDC", "BNB", "XRP", "SOL", "TRX", "DOGE", "ADA",
-  "AVAX", "DOT", "LINK", "TON", "NEAR", "SUI", "MATIC", "LTC", "BCH", "UNI",
+  "BTC",
+  "ETH",
+  "USDT",
+  "USDC",
+  "BNB",
+  "XRP",
+  "SOL",
+  "TRX",
+  "DOGE",
+  "ADA",
+  "AVAX",
+  "DOT",
+  "LINK",
+  "TON",
+  "NEAR",
+  "SUI",
+  "MATIC",
+  "LTC",
+  "BCH",
+  "UNI",
 ];
 
 const COIN_ALIASES = {
@@ -137,9 +156,7 @@ export function extractSlots(text) {
 
   // Read the amount off the RAW text, not the normalised tokens — normalising
   // strips the decimal point, which turned "send 0.5 eth" into "0" and "5".
-  const amountMatch = String(text).match(
-    /(\d[\d,]*(?:\.\d+)?)\s*([km])?\b/i,
-  );
+  const amountMatch = String(text).match(/(\d[\d,]*(?:\.\d+)?)\s*([km])?\b/i);
   if (amountMatch) {
     slots.amount = parseAmount(`${amountMatch[1]}${amountMatch[2] || ""}`);
   }
@@ -164,6 +181,11 @@ function decision(partial) {
     reply: null,
     confidence: 1,
     source: "keyword",
+    // Only ever set on the LLM path. The sealed, keyword and value paths
+    // don't look at language at all — null here means "no opinion", which
+    // is not the same as "English".
+    language: null,
+    languageConfidence: 0,
     ...partial,
   };
 }
@@ -353,11 +375,15 @@ export async function resolveIntent({ text, sessionData, profile }) {
   }
 
   // ── 5. Ambiguous, conversational, or unrecognised → the model ────
-  const ai = await classifyMessage({ text: raw, state, profile });
+  const ai = await classifyMessage({
+    text: raw,
+    state,
+    profile,
+    lang: sessionData?.lang,
+  });
 
   if (ai && DECISION_TYPES.includes(ai.type)) {
-    const confidence =
-      typeof ai.confidence === "number" ? ai.confidence : 0.5;
+    const confidence = typeof ai.confidence === "number" ? ai.confidence : 0.5;
 
     // A SWITCH_FLOW with no flow is meaningless — don't act on it.
     if (ai.type === "SWITCH_FLOW" && !ai.flow) {
@@ -401,6 +427,9 @@ export async function resolveIntent({ text, sessionData, profile }) {
               "I'm here to help with your VIXA wallet — what would you like to do?"
             : null,
         confidence,
+        language: ai.language || null,
+        languageConfidence:
+          typeof ai.languageConfidence === "number" ? ai.languageConfidence : 0,
         source: "llm",
       }),
     );
@@ -428,9 +457,7 @@ export async function resolveIntent({ text, sessionData, profile }) {
   return withState(
     decision({
       type: state.active ? "ANSWER" : "MENU",
-      reply: state.active
-        ? "Sorry, I didn't quite get that."
-        : null,
+      reply: state.active ? "Sorry, I didn't quite get that." : null,
       source: "fallback",
       confidence: 0.3,
     }),

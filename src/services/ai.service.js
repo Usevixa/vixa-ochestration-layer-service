@@ -84,13 +84,34 @@ const INTENT_SCHEMA = {
         type: "number",
         description: "0 to 1. Below 0.6 the router will ask for clarification.",
       },
+      language: {
+        type: ["string", "null"],
+        description:
+          "BCP-47 code of the language the user wrote in — 'en', 'fr', 'es', 'pt', 'sw'. Nigerian Pidgin is 'en'. Null when the message is too short or ambiguous to tell (a bare number, 'ok', 'yes').",
+      },
+      languageConfidence: {
+        type: "number",
+        description:
+          "0 to 1, how sure you are of `language`. Be honest: African languages are easily misidentified. Below 0.8 the app keeps the user in English.",
+      },
     },
-    required: ["type", "flow", "value", "slots", "reply", "confidence"],
+    required: [
+      "type",
+      "flow",
+      "value",
+      "slots",
+      "reply",
+      "confidence",
+      "language",
+      "languageConfidence",
+    ],
   },
 };
 
-function buildSystemPrompt(state, profile) {
-  const name = profile?.firstName ? ` The user's name is ${profile.firstName}.` : "";
+function buildSystemPrompt(state, profile, lang) {
+  const name = profile?.firstName
+    ? ` The user's name is ${profile.firstName}.`
+    : "";
 
   return `You are VIXA, a crypto wallet assistant that runs inside WhatsApp for Nigerian users.${name}
 
@@ -143,7 +164,18 @@ NEVER:
 
 Set confidence honestly. If the message is genuinely unclear, use a low
 confidence and return ANSWER rather than guessing a flow — a wrong SWITCH_FLOW
-destroys a transaction the user was halfway through.`;
+destroys a transaction the user was halfway through.
+
+LANGUAGE:
+Report the language the user wrote in as "language", with "languageConfidence".
+${
+  lang && lang !== "en"
+    ? `This user's language is set to ${lang}. Write "reply" in ${lang}.`
+    : `Write "reply" in English.`
+}
+Nigerian Pidgin counts as English — report 'en' and reply in English.
+A bare number, "ok", "yes" or a single word is NOT enough to identify a
+language: return null with a low confidence rather than guessing.`;
 }
 
 /**
@@ -152,7 +184,7 @@ destroys a transaction the user was halfway through.`;
  * @returns {Promise<object|null>} null when the model is unavailable or
  *   returns something unusable — callers MUST have a deterministic fallback.
  */
-export async function classifyMessage({ text, state, profile }) {
+export async function classifyMessage({ text, state, profile, lang }) {
   const openai = getOpenAI();
   if (!openai) return null;
 
@@ -162,7 +194,7 @@ export async function classifyMessage({ text, state, profile }) {
         model: INTENT_MODEL,
         temperature: 0,
         messages: [
-          { role: "system", content: buildSystemPrompt(state, profile) },
+          { role: "system", content: buildSystemPrompt(state, profile, lang) },
           { role: "user", content: text },
         ],
         response_format: { type: "json_schema", json_schema: INTENT_SCHEMA },

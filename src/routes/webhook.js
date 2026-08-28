@@ -2125,6 +2125,36 @@ router.post("/callback", async (req, res) => {
               profile: { firstName: session.data?.firstName },
             });
 
+            // ── Language: detect ONCE, then leave it alone ──────────
+            //
+            // Set on the first substantive message and never re-detected.
+            // Users code-switch constantly, so per-message detection would
+            // flip the bot's language halfway through a withdrawal.
+            //
+            // Deliberately NOT added to clearedFlowState — a language is a
+            // preference, not flow state, and must survive a cancel.
+            //
+            // INSTRUMENTATION ONLY for now: nothing reads session.data.lang
+            // to choose copy yet. It's here so the logs tell us which
+            // languages are worth translating for.
+            const LANG_CONFIDENCE_FLOOR = 0.8;
+
+            if (
+              !session.data?.lang &&
+              decision.language &&
+              decision.language !== "en" &&
+              decision.languageConfidence >= LANG_CONFIDENCE_FLOOR
+            ) {
+              await updateSession(from, {
+                data: { ...session.data, lang: decision.language },
+              });
+              session = await getSession(from);
+              logger.info("language.detected", {
+                lang: decision.language,
+                confidence: decision.languageConfidence,
+              });
+            }
+
             console.log(
               `[intent] "${rawText}" → ${decision.type}` +
                 `${decision.flow ? `/${decision.flow}` : ""}` +
@@ -2143,6 +2173,9 @@ router.post("/callback", async (req, res) => {
               currentFlow: flowState.flow,
               currentStep: flowState.step,
               sealed: flowState.sealed,
+              sessionLang: session.data?.lang || "en",
+              detectedLang: decision.language,
+              detectedLangConfidence: decision.languageConfidence,
               text: flowState.sealed ? "[redacted]" : rawText,
             });
 
@@ -3882,8 +3915,6 @@ router.post("/flow/callback", async (req, res) => {
     return res.status(500).send("Server Error");
   }
 });
-
-
 
 async function handlePinFlowSubmission({
   phone,
