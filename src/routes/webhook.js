@@ -1777,6 +1777,8 @@ router.post("/callback", async (req, res) => {
 
               // countriesList feeds the WITHDRAW_COUNTRY_* handler; currentPage
               // drives the "See More" pages of sendPaginatedCountriesMenu.
+              // countriesList feeds the ::COUNTRY_SELECT handler in
+              // processFlowCompletion once the Flow comes back.
               await updateSession(from, {
                 data: {
                   ...session.data,
@@ -1789,17 +1791,26 @@ router.post("/callback", async (req, res) => {
                 },
               });
 
-              // NOTE: this used to call triggerCountrySelectionFlow. The Flow
-              // published behind COUNTRY_SELECTION_FLOW_ID is still Meta's
-              // default WELCOME_SCREEN template, so every send came back
-              // #131009 ("SELECT_COUNTRY is not allowed as first screen") and
-              // the user got nothing at all. The list menu needs no Flow.
-              await sendPaginatedCountriesMenu(
+              // The Flow gives one scrollable dropdown instead of nine rows
+              // at a time. It previously failed with #131009 because the Flow
+              // behind COUNTRY_SELECTION_FLOW_ID was still Meta's default
+              // WELCOME_SCREEN template — if that recurs, the send returns
+              // false and we fall back to the list rather than sending
+              // nothing at all.
+              const countryFlowSent = await triggerCountrySelectionFlow(
                 from,
                 phone_number_id,
                 countriesRes.data,
-                0,
               );
+
+              if (!countryFlowSent) {
+                await sendPaginatedCountriesMenu(
+                  from,
+                  phone_number_id,
+                  countriesRes.data,
+                  0,
+                );
+              }
               return;
             }
 
