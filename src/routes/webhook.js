@@ -393,17 +393,21 @@ router.post("/callback", async (req, res) => {
             msg._fromVoice = true;
           }
 
+          // A Flow submission carries the PIN itself, so interrupting it to
+          // ask for a PIN would be circular — it stays excluded from the
+          // token check below.
           const isFlowReply =
             msg.type === "interactive" && msg.interactive?.type === "nfm_reply";
 
-          const isInteractiveReply =
-            msg.type === "interactive" &&
-            (msg.interactive?.type === "button_reply" ||
-              msg.interactive?.type === "list_reply");
-
+          // Button and list taps were ALSO excluded here, which meant every
+          // interactive handler that calls the API — country select, bank
+          // select, balance, swap, send — ran with whatever token was in the
+          // session, expired or not. A dead token came back as a 401 and got
+          // reported to the user as "No payment channels available for this
+          // country", which looks like a data problem and isn't. They need a
+          // live token exactly as much as a typed message does.
           if (
             !isFlowReply &&
-            !isInteractiveReply &&
             session.data?.authenticated &&
             !isSessionTokenValid(session.data)
           ) {
@@ -433,12 +437,23 @@ router.post("/callback", async (req, res) => {
                   console.log(
                     `Silent refresh failed for ${from}. Requesting PIN.`,
                   );
+
+                  // Remember which flow they were in so login can put them
+                  // back. Sealed steps are skipped — the PIN Flow already
+                  // routes those correctly on its own.
+                  const dyingState = describeFlowState(session.data);
+                  const resume =
+                    dyingState.active && !dyingState.sealed
+                      ? { flow: dyingState.flow, at: Date.now() }
+                      : null;
+
                   await updateSession(from, {
                     data: {
                       ...session.data,
                       authenticated: false,
                       awaitingPin: true,
                       pinAttempts: 0,
+                      pendingResume: resume,
                       pendingDeposit: false,
                       awaitingDepositConfirmation: false,
                       awaitingDepositPin: false,
@@ -455,12 +470,21 @@ router.post("/callback", async (req, res) => {
                 console.log(
                   `No valid refresh token for ${from}. Requesting PIN.`,
                 );
+
+                // Same capture as the refresh-failed branch above.
+                const dyingState = describeFlowState(session.data);
+                const resume =
+                  dyingState.active && !dyingState.sealed
+                    ? { flow: dyingState.flow, at: Date.now() }
+                    : null;
+
                 await updateSession(from, {
                   data: {
                     ...session.data,
                     authenticated: false,
                     awaitingPin: true,
                     pinAttempts: 0,
+                    pendingResume: resume,
                     pendingDeposit: false,
                     awaitingDepositConfirmation: false,
                     awaitingDepositPin: false,
@@ -4033,6 +4057,38 @@ async function handlePinFlowSubmission({
           `Welcome back ${me.firstName} 👋`,
           phone_number_id,
         );
+
+        // ── Resume whatever the expired token interrupted ──────────
+        //
+        // We restart the flow at its entry point rather than replaying the
+        // exact step. Replaying means storing and re-executing the tap that
+        // failed, and that's where the bugs live — stale state, changed
+        // availability, a different tap in between. One extra tap is the
+        // better trade, and re-picking a country after a night away is
+        // arguably correct anyway: channel availability may have moved.
+        const RESUME_MAX_AGE_MS = 60 * 60 * 1000;
+        const resumed = await getSession(phone);
+        const resume = resumed.data?.pendingResume;
+
+        // Always clear it, even when stale — a resume marker is single-use.
+        if (resume) {
+          await updateSession(phone, {
+            data: { ...resumed.data, pendingResume: null },
+          });
+        }
+
+        if (resume?.flow && Date.now() - (resume.at || 0) < RESUME_MAX_AGE_MS) {
+          logger.info("session.resumed", { flow: resume.flow });
+          const fresh = await getSession(phone);
+          await safeRouteToFlow(
+            resume.flow,
+            phone,
+            phone_number_id,
+            fresh.data,
+          );
+          return;
+        }
+
         await sendMainMenu(phone, phone_number_id);
       } catch (err) {
         const attempts = (session.data?.pinAttempts || 0) + 1;

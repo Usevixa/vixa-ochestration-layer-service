@@ -406,7 +406,14 @@ export function describeFlowState(sessionData) {
   return { ...UNKNOWN_STATE };
 }
 
-/** Wipe every in-progress flow. One list, so no flow is ever left half-set. */
+/**
+ * Wipe every in-progress flow. One list, so no flow is ever left half-set.
+ *
+ * NOT cleared here, deliberately: `lang` and `pendingResume`. Both are
+ * intents that must outlive the flow — pendingResume records "send them
+ * back to X after they re-authenticate", which is precisely the moment the
+ * flow state gets wiped.
+ */
 export function clearedFlowState(sessionData) {
   return {
     ...(sessionData || {}),
