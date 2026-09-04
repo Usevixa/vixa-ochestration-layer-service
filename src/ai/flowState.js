@@ -167,17 +167,32 @@ export function describeFlowState(sessionData) {
         describe: `In the SEND flow. Waiting for the amount of ${d.send.coin || "crypto"} to send.`,
         rePrompt: `💰 Enter the amount of *${d.send.coin || "crypto"}* you want to send:`,
       },
-      ENTER_ADDRESS: {
-        expecting: "address",
-        describe:
-          "In the SEND flow. Waiting for the destination blockchain wallet address.",
-        rePrompt: "📩 Please paste the wallet address you're sending to:",
-      },
+      // ENTER_ADDRESS serves BOTH P2P and external sends. Describing it as a
+      // "blockchain wallet address" unconditionally meant a P2P user typing a
+      // valid phone number got told it wasn't a wallet address — the model
+      // reads `describe` verbatim, returned ANSWER, and the handler that
+      // knows about isP2P never ran.
+      ENTER_ADDRESS:
+        d.send.type === "P2P"
+          ? {
+              expecting: "phone",
+              describe:
+                "In the SEND flow, sending to another VIXA user. Waiting for the recipient's phone number — a Nigerian mobile number like 08012345678 is exactly what we want here.",
+              rePrompt:
+                "📱 Enter the recipient's *phone number*:\n(e.g. 08012345678)",
+            }
+          : {
+              expecting: "address",
+              describe:
+                "In the SEND flow, sending to an external wallet. Waiting for the destination blockchain wallet address.",
+              rePrompt: "📩 Please paste the wallet address you're sending to:",
+            },
       ENTER_TAG: {
         expecting: "tag",
         describe:
-          "In the SEND flow. Waiting for the recipient's VIXA tag or phone number.",
-        rePrompt: "👤 Please enter the recipient's VIXA tag or phone number:",
+          "In the SEND flow. This chain requires a destination tag / memo alongside the address. Waiting for that tag.",
+        rePrompt:
+          "🏷️ Enter the destination tag / memo (required for this network):",
       },
       ENTER_PIN: {
         expecting: "pin",
@@ -450,6 +465,7 @@ export const VOICE_BLOCKED_EXPECTATIONS = new Set([
   "pin",
   "otp",
   "address",
+  "phone",
   "tag",
   "account_number",
   "account_name",

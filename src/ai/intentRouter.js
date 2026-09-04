@@ -366,6 +366,20 @@ export async function resolveIntent({ text, sessionData, profile }) {
       );
     }
 
+    // A P2P recipient's phone number. Accept the shapes Nigerians actually
+    // type — 08012345678, 2348012345678, +2348012345678 — and strip spaces
+    // and dashes first. Without this the number reaches the model, costing a
+    // round trip, and a model timeout drops them on "I didn't quite get that"
+    // in the middle of a transfer.
+    if (state.expecting === "phone") {
+      const digits = raw.replace(/[\s-]/g, "");
+      if (/^\+?\d{10,15}$/.test(digits)) {
+        return withState(
+          decision({ type: "PROVIDE_INPUT", value: digits, source: "value" }),
+        );
+      }
+    }
+
     // A wallet address: one long unbroken token, no spaces.
     if (state.expecting === "address" && /^[a-zA-Z0-9:_-]{20,}$/.test(raw)) {
       return withState(
