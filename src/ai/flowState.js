@@ -79,13 +79,24 @@ export function describeFlowState(sessionData) {
   }
 
   if (d.awaitingDepositConfirmation) {
+    // NOT an active flow. The deposit is created and bank details have been
+    // sent; we're waiting on an out-of-band bank transfer, not on anything
+    // the user has to type here. Marking it active + committed trapped users
+    // once the backend settled the deposit on its own — every later message
+    // came back as "You're already on it" (active + same flow, rePrompt null)
+    // or the abandon-confirmation prompt (committed + different flow), with
+    // no way out.
+    //
+    // The "Have Paid" button is an interactive button_reply and is handled
+    // well before the intent router, so it still works with active: false.
     return state({
+      active: false,
       flow: "DEPOSIT",
       step: "AWAITING_CONFIRMATION",
-      expecting: "confirmation",
-      committed: true,
+      expecting: null,
+      committed: false,
       describe:
-        "In the DEPOSIT flow, waiting for the user to confirm they have paid.",
+        "A deposit has been created and the user has been given bank details. Nothing is blocking them.",
       rePrompt: null,
     });
   }
@@ -127,7 +138,11 @@ export function describeFlowState(sessionData) {
       },
       COMPLETED: { expecting: null, describe: "The swap has completed." },
     };
-    return state({ flow: "SWAP", step: d.swap.step, ...(map[d.swap.step] || {}) });
+    return state({
+      flow: "SWAP",
+      step: d.swap.step,
+      ...(map[d.swap.step] || {}),
+    });
   }
 
   // ── Send ───────────────────────────────────────────────────────
@@ -177,7 +192,11 @@ export function describeFlowState(sessionData) {
         rePrompt: "🔐 Enter your *4-digit PIN* to authorize this transfer.",
       },
     };
-    return state({ flow: "SEND", step: d.send.step, ...(map[d.send.step] || {}) });
+    return state({
+      flow: "SEND",
+      step: d.send.step,
+      ...(map[d.send.step] || {}),
+    });
   }
 
   // ── Withdraw ───────────────────────────────────────────────────
@@ -383,7 +402,14 @@ export function describeFlowState(sessionData) {
   return { ...UNKNOWN_STATE };
 }
 
-/** Wipe every in-progress flow. One list, so no flow is ever left half-set. */
+/**
+ * Wipe every in-progress flow. One list, so no flow is ever left half-set.
+ *
+ * NOT cleared here, deliberately: `lang` and `pendingResume`. Both are
+ * intents that must outlive the flow — pendingResume records "send them
+ * back to X after they re-authenticate", which is precisely the moment the
+ * flow state gets wiped.
+ */
 export function clearedFlowState(sessionData) {
   return {
     ...(sessionData || {}),
@@ -417,7 +443,12 @@ export function clearedFlowState(sessionData) {
  * Keyed on `expecting`, not step name, so new steps inherit the policy.
  */
 export const VOICE_BLOCKED_EXPECTATIONS = new Set([
-  "pin", "otp", "address", "tag", "account_number", "account_name",
+  "pin",
+  "otp",
+  "address",
+  "tag",
+  "account_number",
+  "account_name",
 ]);
 
 export function voiceAllowed(state) {
