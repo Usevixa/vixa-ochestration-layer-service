@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - dev
+      - main
 
 env:
   REGISTRY: ghcr.io
@@ -27,16 +28,34 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
+      # dev keeps publishing the moving :latest tag exactly as before — that tag is what the
+      # deploy job below pulls, so it must never be touched by a main build. main gets its own
+      # immutable per-commit tag (main-<short sha>) instead, so a main publish can never
+      # overwrite what dev's deploy step relies on. Unrecognised branches fail loudly rather
+      # than silently falling back to a guessed tag.
+      - name: Set image tag
+        id: vars
+        run: |
+          case "${{ github.ref_name }}" in
+            dev)  echo "tag=latest" >> "$GITHUB_OUTPUT" ;;
+            main) echo "tag=main-$(git rev-parse --short HEAD)" >> "$GITHUB_OUTPUT" ;;
+            *)    echo "Unexpected branch '${{ github.ref_name }}' — refusing to guess a tag." >&2; exit 1 ;;
+          esac
+
       - name: Build and push image
         uses: docker/build-push-action@v5
         with:
           context: .
           push: true
-          tags: ${{ env.IMAGE_NAME }}:latest
+          tags: ${{ env.IMAGE_NAME }}:${{ steps.vars.outputs.tag }}
 
   deploy:
     runs-on: ubuntu-latest
     needs: build
+    # dev only. This job deploys (SSH + docker compose up) to the same DEPLOY_HOST this
+    # workflow has always used, on both its main-triggered and dev-triggered eras — do not let
+    # a main push reach it. main publishes an image only; production stays a hand-deploy.
+    if: github.ref_name == 'dev'
 
     steps:
       - name: Deploy to server via SSH
