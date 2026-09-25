@@ -1970,21 +1970,32 @@ router.post("/callback", async (req, res) => {
 
           // --- END FIX ---
 
-          // Template quick-reply buttons (backend reminders sent outside the
-          // 24-hour window) arrive as type "button", NOT as an interactive
-          // button_reply. Without this branch they're silently dropped.
+          // Template quick-reply buttons (reminders sent by the other server,
+          // e.g. "Activate My VIXA", "Finish Setup", "Verify BVN") arrive as
+          // type "button", NOT as an interactive button_reply. Every tap MUST
+          // get a reply — an unrecognised one is treated like the user saying hi.
           if (msg.type === "button") {
-            const payload = msg.button?.payload || "";
+            // If the sender set no payload, WhatsApp uses the button label.
+            // Normalise both so "Finish Setup", "finish-setup" and
+            // "FINISH_SETUP" all match the same key.
+            const norm = (s) =>
+              String(s || "")
+                .trim()
+                .toUpperCase()
+                .replace(/[^A-Z0-9]+/g, "_")
+                .replace(/^_|_$/g, "");
+            const keys = [norm(msg.button?.payload), norm(msg.button?.text)];
 
-            if (payload === "VERIFY_BVN") {
+            console.log(`Template button from ${from}:`, keys.join(" | "));
+            logger.info("template.button", { keys });
+
+            if (keys.includes("VERIFY_BVN")) {
               await openBvnVerification(from, phone_number_id);
+            } else if (keys.includes("VERIFY_KYC")) {
+              await openKycVerification(from, phone_number_id);
             } else {
-              console.log(
-                `Unhandled template button "${payload}" from ${from}`,
-              );
-              if (session.data?.authenticated) {
-                await sendMainMenu(from, phone_number_id);
-              }
+              // ACTIVATE_MY_VIXA, FINISH_SETUP, or anything unrecognised.
+              await resumeSetup(from, phone_number_id, session);
             }
             continue;
           }
@@ -3774,6 +3785,70 @@ async function openBvnVerification(phone, phone_number_id) {
   await triggerBVNFlow(phone, phone_number_id);
 }
 
+/** Entry point for a "Verify identity" reminder CTA (payload VERIFY_KYC). */
+async function openKycVerification(phone, phone_number_id) {
+  const live = await ensureLiveToken(
+    phone,
+    phone_number_id,
+    "🔐 Please sign in first — your verification form will open right after.",
+  );
+  if (!live) return;
+  await triggerKYCFlow(phone, phone_number_id);
+}
+
+/**
+ * "Activate My VIXA" / "Finish Setup" / any unrecognised template tap.
+ * Same outcome as the user typing "hi", but explicit — so a tap while a PIN
+ * is pending re-sends the PIN form instead of being read as a wrong PIN.
+ */
+async function resumeSetup(phone, phone_number_id, session) {
+  // Already signed in → nothing to set up from here.
+  if (session.data?.authenticated) {
+    await sendWhatsApp(
+      phone,
+      "👋 You're signed in — here's what you can do:",
+      phone_number_id,
+    );
+    await sendMainMenu(phone, phone_number_id);
+    return;
+  }
+
+  // Mid-login → just re-send the PIN form.
+  if (session.data?.awaitingPin) {
+    await triggerPinFlow(phone, phone_number_id, "LOGIN");
+    return;
+  }
+
+  const checkData = await checkPhoneNumber(phone);
+
+  if (!checkData) {
+    await sendWhatsApp(
+      phone,
+      "⚠️ Service momentarily unavailable. Please try again later.",
+      phone_number_id,
+    );
+    return;
+  }
+
+  if (checkData.exists) {
+    // Registered → sign in. After login, the onboarding stage check sends
+    // the KYC or BVN form if either is still outstanding.
+    await updateSession(phone, {
+      data: {
+        ...(session.data || {}),
+        awaitingPin: true,
+        pinAttempts: 0,
+      },
+    });
+    await triggerPinFlow(phone, phone_number_id, "LOGIN");
+    return;
+  }
+
+  // Not registered → onboarding form.
+  notifyOnboardingStageStarted(phone, phone_number_id);
+  await triggerFlow(phone, phone_number_id);
+}
+
 /* ------------- KYC: NIN first, BVN only if NIN passes ------------- */
 async function handleKycSubmission(phone, phone_number_id, form) {
   const nin = String(form.nin || "").trim();
@@ -4126,7 +4201,7 @@ async function handlePinFlowSubmission({
           onboardingStage,
         );
 
-             if (!isFullyOnboarded) {
+        if (!isFullyOnboarded) {
           // Onboarded, KYC not started → combined KYC form
           if (onboardingStage === "BasicInfoCompleted") {
             await sendWhatsApp(
@@ -5825,7 +5900,6 @@ async function triggerBVNFlow(toPhone, phone_number_id) {
   }
   console.log("triggerBVNFlow sent to", toPhone);
 }
-
 
 async function triggerKYCFlow(toPhone, phone_number_id) {
   if (!WHATSAPP_TOKEN || !phone_number_id || !KYC_FLOW_ID) {
