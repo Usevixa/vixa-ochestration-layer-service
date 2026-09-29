@@ -15,6 +15,9 @@
  *                sent to the LLM and never reinterpreted as an intent.
  *   committed  — true once money is one confirmation away. Abandoning a
  *                committed step requires an explicit yes/no from the user.
+ *   pinContext — PIN steps only: the triggerPinFlow() context that reopens
+ *                the Flow. PINs are never typed in VIXA, so a re-prompt has
+ *                to re-send the Flow button rather than a bare string.
  *   describe   — plain English, injected into the model prompt
  *   rePrompt   — what to re-send after answering a question, so the user is
  *                never left wondering what we wanted
@@ -27,6 +30,12 @@ const UNKNOWN_STATE = {
   expecting: null,
   sealed: false,
   committed: false,
+  /**
+   * For sealed PIN steps only: the triggerPinFlow() context that reopens the
+   * Flow. PINs are never typed in VIXA — there is no text handler for them —
+   * so a re-prompt must re-send the Flow button, not a bare string.
+   */
+  pinContext: null,
   describe: "Nothing in progress. The user is at the main menu.",
   rePrompt: null,
 };
@@ -47,6 +56,7 @@ export function describeFlowState(sessionData) {
       step: "AWAITING_PIN",
       expecting: "pin",
       sealed: true,
+      pinContext: "LOGIN",
       describe: "Waiting for the user's 4-digit login PIN.",
       rePrompt: "🔐 Please enter your *4-digit PIN* to continue.",
     });
@@ -72,6 +82,7 @@ export function describeFlowState(sessionData) {
       expecting: "pin",
       sealed: true,
       committed: true,
+      pinContext: "DEPOSIT",
       describe:
         "In the DEPOSIT flow. The rate has been shown and we are waiting for the 4-digit PIN that authorises the deposit.",
       rePrompt: "🔐 Enter your *4-digit PIN* to confirm this deposit.",
@@ -132,6 +143,7 @@ export function describeFlowState(sessionData) {
         expecting: "pin",
         sealed: true,
         committed: true,
+        pinContext: "SWAP",
         describe:
           "In the SWAP flow. A quote has been shown and we are waiting for the PIN that executes the swap.",
         rePrompt: "🔐 Please enter your *PIN* to authorize this swap.",
@@ -187,6 +199,7 @@ export function describeFlowState(sessionData) {
         expecting: "pin",
         sealed: true,
         committed: true,
+        pinContext: "SEND",
         describe:
           "In the SEND flow. Waiting for the PIN that releases the transfer.",
         rePrompt: "🔐 Enter your *4-digit PIN* to authorize this transfer.",
@@ -271,6 +284,7 @@ export function describeFlowState(sessionData) {
         expecting: "pin",
         sealed: true,
         committed: true,
+        pinContext: "WITHDRAW_QUOTE",
         describe:
           "In the WITHDRAW flow. Waiting for the PIN that locks in the quote.",
         rePrompt: "🔐 Enter your *4-digit PIN* to continue this withdrawal.",
@@ -279,6 +293,7 @@ export function describeFlowState(sessionData) {
         expecting: "pin",
         sealed: true,
         committed: true,
+        pinContext: "WITHDRAW_EXECUTE",
         describe:
           "In the WITHDRAW flow. Waiting for the PIN that actually sends the money out.",
         rePrompt: "🔐 Enter your *4-digit PIN* to execute this withdrawal.",
@@ -319,6 +334,7 @@ export function describeFlowState(sessionData) {
       ENTER_CURRENT_PIN: {
         expecting: "pin",
         sealed: true,
+        pinContext: "CHANGE_PIN_CURRENT",
         describe: "In the CHANGE PIN flow. Waiting for the current PIN.",
         rePrompt: "🔐 Enter your *current PIN* to begin the change:",
       },
@@ -333,12 +349,14 @@ export function describeFlowState(sessionData) {
       ENTER_NEW_PIN: {
         expecting: "pin",
         sealed: true,
+        pinContext: "CHANGE_PIN_NEW",
         describe: "In the CHANGE PIN flow. Waiting for the new 4-digit PIN.",
         rePrompt: "🔐 Enter your *new 4-digit PIN*:",
       },
       ENTER_CONFIRM_PIN: {
         expecting: "pin",
         sealed: true,
+        pinContext: "CHANGE_PIN_CONFIRM",
         describe: "In the CHANGE PIN flow. Waiting for the new PIN again.",
         rePrompt: "🔐 Re-enter your *new 4-digit PIN* to confirm:",
       },
@@ -364,6 +382,7 @@ export function describeFlowState(sessionData) {
         expecting: "pin",
         sealed: true,
         committed: true,
+        pinContext: "LOCK_WALLET",
         describe: "In the LOCK WALLET flow. Waiting for the confirming PIN.",
         rePrompt: "🔐 Enter your *4-digit PIN* to lock your wallet.",
       },
@@ -388,6 +407,7 @@ export function describeFlowState(sessionData) {
         expecting: "pin",
         sealed: true,
         committed: true,
+        pinContext: "UNLOCK_WALLET",
         describe: "In the UNLOCK WALLET flow. Waiting for the confirming PIN.",
         rePrompt: "🔐 Enter your *4-digit PIN* to unlock your wallet.",
       },
