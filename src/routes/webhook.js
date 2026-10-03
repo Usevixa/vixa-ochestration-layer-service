@@ -1714,8 +1714,7 @@ router.post("/callback", async (req, res) => {
             // the list_reply block above, where it could never match, and the
             // tap did nothing at all.
             if (actionId === "CONFIRM_DEPOSIT_PAYMENT") {
-              const depositId =
-                session.data?.depositId ?? session.data?.id ?? null;
+              const depositId = session.data?.depositId ?? null;
 
               if (!depositId) {
                 await sendWhatsApp(
@@ -4280,6 +4279,20 @@ async function handlePinFlowSubmission({
         phone_number_id,
       );
 
+      // The create-deposit response may carry the deposit ID as `id` or as
+      // `intentId` (per backend). Use whichever is present — confirmPayment()
+      // needs it when the user taps "Have Paid".
+      const depositId =
+        depositData.id ?? depositData.intentId ?? depositData.depositId ?? null;
+
+      if (!depositId) {
+        // Field NAMES only — shows where the ID actually is if this ever fires.
+        console.error(
+          "DEPOSIT: no id/intentId in create-deposit response. Keys:",
+          Object.keys(depositData || {}).join(", "),
+        );
+      }
+
       await updateSession(phone, {
         data: {
           ...session.data,
@@ -4287,10 +4300,7 @@ async function handlePinFlowSubmission({
           awaitingDepositPin: false,
           awaitingDepositConfirmation: true,
           depositReference: depositData.reference,
-          // `id: session.data.id` read the field back from itself — nothing
-          // ever wrote it, so confirmPayment() was always called with
-          // undefined and "Have Paid" could never confirm anything.
-          depositId: depositData.id ?? depositData.depositId ?? null,
+          depositId,
           depositExpiresAt: depositData.expiresAtUtc ?? null,
         },
       });
