@@ -43,13 +43,32 @@ const DECISION_TYPES = [
 const FREE_TEXT_EXPECTATIONS = new Set(["text", "account_name", "tag"]);
 
 /** Only these end a sealed step. Everything else gets a canned nudge. */
-const HARD_CANCEL = /^(cancel|stop|abort|quit|exit|forget it|nevermind|never mind)$/;
+const HARD_CANCEL =
+  /^(cancel|stop|abort|quit|exit|forget it|nevermind|never mind)$/;
 
 const MENU_REQUEST = /^(menu|main menu|options|home|start|hi|hello|hey)$/;
 
 const COIN_SYMBOLS = [
-  "BTC", "ETH", "USDT", "USDC", "BNB", "XRP", "SOL", "TRX", "DOGE", "ADA",
-  "AVAX", "DOT", "LINK", "TON", "NEAR", "SUI", "MATIC", "LTC", "BCH", "UNI",
+  "BTC",
+  "ETH",
+  "USDT",
+  "USDC",
+  "BNB",
+  "XRP",
+  "SOL",
+  "TRX",
+  "DOGE",
+  "ADA",
+  "AVAX",
+  "DOT",
+  "LINK",
+  "TON",
+  "NEAR",
+  "SUI",
+  "MATIC",
+  "LTC",
+  "BCH",
+  "UNI",
 ];
 
 const COIN_ALIASES = {
@@ -137,9 +156,7 @@ export function extractSlots(text) {
 
   // Read the amount off the RAW text, not the normalised tokens — normalising
   // strips the decimal point, which turned "send 0.5 eth" into "0" and "5".
-  const amountMatch = String(text).match(
-    /(\d[\d,]*(?:\.\d+)?)\s*([km])?\b/i,
-  );
+  const amountMatch = String(text).match(/(\d[\d,]*(?:\.\d+)?)\s*([km])?\b/i);
   if (amountMatch) {
     slots.amount = parseAmount(`${amountMatch[1]}${amountMatch[2] || ""}`);
   }
@@ -205,8 +222,22 @@ export async function resolveIntent({ text, sessionData, profile }) {
 
   // ── 0. Sealed states: secrets never reach the model ──────────────
   if (state.sealed) {
-    // A PIN/OTP shaped message is the answer. Nothing else to decide.
+    // OTPs are typed and have handlers in the state machine. PINs are NOT —
+    // they come back through the PIN Flow (processFlowCompletion), so a typed
+    // PIN has nothing to claim it and used to fall all the way through to
+    // "I didn't quite get that", trapping the user in a loop with their PIN
+    // sitting in plaintext in the chat.
     if (/^\d{4,8}$/.test(raw)) {
+      if (state.expecting === "pin") {
+        return withState(
+          decision({
+            type: "ANSWER",
+            reply:
+              "🔒 For your security, please use the *Enter PIN* button above rather than typing it here.\n\nI'd also delete that message from this chat.",
+            source: "sealed",
+          }),
+        );
+      }
       return withState(
         decision({ type: "PROVIDE_INPUT", value: raw, source: "sealed" }),
       );
@@ -342,8 +373,7 @@ export async function resolveIntent({ text, sessionData, profile }) {
   const ai = await classifyMessage({ text: raw, state, profile });
 
   if (ai && DECISION_TYPES.includes(ai.type)) {
-    const confidence =
-      typeof ai.confidence === "number" ? ai.confidence : 0.5;
+    const confidence = typeof ai.confidence === "number" ? ai.confidence : 0.5;
 
     // A SWITCH_FLOW with no flow is meaningless — don't act on it.
     if (ai.type === "SWITCH_FLOW" && !ai.flow) {
@@ -414,9 +444,7 @@ export async function resolveIntent({ text, sessionData, profile }) {
   return withState(
     decision({
       type: state.active ? "ANSWER" : "MENU",
-      reply: state.active
-        ? "Sorry, I didn't quite get that."
-        : null,
+      reply: state.active ? "Sorry, I didn't quite get that." : null,
       source: "fallback",
       confidence: 0.3,
     }),
