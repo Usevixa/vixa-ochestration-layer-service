@@ -3,7 +3,7 @@
  * carry that user's own token.
  *
  * The balance check makes two API calls in a row (/auth/me, then
- * /wallet/balances). The fake API below holds user A's /auth/me open
+ * /wallet/get-balances). The fake API below holds user A's /auth/me open
  * while user B's whole balance check runs. With a shared, module-level token,
  * A's second call went out with B's token — and A was shown B's balance.
  *
@@ -50,7 +50,7 @@ const api = http.createServer(async (req, res) => {
   if (path === "/auth/me") {
     return res.end(JSON.stringify({ firstName: user.name }));
   }
-  if (path === "/wallet/balances") {
+  if (path === "/wallet/get-balances") {
     return res.end(
       JSON.stringify({
         success: true,
@@ -180,10 +180,10 @@ check("A's balance check finished", aDone);
 for (const [phone, u] of Object.entries(TOKENS)) {
   const mine = apiCalls.filter((c) => c.token === u.token).map((c) => c.path);
   check(
-    `${u.name}'s token used for exactly /auth/me + /wallet/balances`,
+    `${u.name}'s token used for exactly /auth/me + /wallet/get-balances`,
     mine.length === 2 &&
       mine.includes("/auth/me") &&
-      mine.includes("/wallet/balances"),
+      mine.includes("/wallet/get-balances"),
     JSON.stringify(mine),
   );
   const msg = balanceMsg(phone) || "";

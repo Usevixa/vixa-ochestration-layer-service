@@ -5,7 +5,7 @@ import { getToken } from "./auth.service.js";
 const VIXA_API_BASE = process.env.VIXA_API_BASE || "https://api.usevixa.com/api/v1";
 
 /**
- * GET /wallet/balances
+ * GET /wallet/get-balances
  * Response: { data: { coins: [{ coin, decimals, total, pending, available,
  *             networks: [{ network, total, pending, available }] }], asOf } }
  *
@@ -16,7 +16,7 @@ export async function fetchWalletBalances(coin = "") {
   try {
     const token = getToken();
 
-    const res = await axios.get(`${VIXA_API_BASE}/wallet/balances`, {
+    const res = await axios.get(`${VIXA_API_BASE}/wallet/get-balances`, {
       headers: {
         Authorization: `Bearer ${token}`,
         Accept: "application/json",
