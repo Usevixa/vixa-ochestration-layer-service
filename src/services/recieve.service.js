@@ -12,31 +12,32 @@ const VIXA_API_BASE =
   process.env.VIXA_API_BASE || "https://api.usevixa.com/api/v1";
 
 /**
- * Fetch crypto receive wallet addresses
- * GET /api/v1/wallet/crypto/subwallets/addresses
+ * Fetch crypto receive addresses
+ * GET /crypto/receive?coin=USDT  (coin optional — omit to list every coin)
+ * Response: { data: [{ coin, network, address, memo, txUrlPrefix }] }
+ *
+ * `wallets` is the list with an `id` added (coin + network), because the
+ * response has none and the network picker needs one to find the pick.
  */
-export async function fetchReceiveWallets({ coin, chain, pageNo = 1, pageLimit = 10 } = {}) {
+export async function fetchReceiveWallets({ coin } = {}) {
   try {
     const token = await getToken();
     if (!token) throw new Error("Missing auth token");
 
-    const res = await axios.get(
-      `${VIXA_API_BASE}/wallet/crypto/subwallets/addresses`,
-      {
-        httpsAgent,
-        params: {
-          coin,
-          chain,
-          pageNo,
-          pageLimit,
-        },
-        headers: { Authorization: `Bearer ${token}` },
-      }
-    );
+    const res = await axios.get(`${VIXA_API_BASE}/crypto/receive`, {
+      httpsAgent,
+      params: coin ? { coin } : {},
+      headers: { Authorization: `Bearer ${token}` },
+    });
 
-    console.log('fetching reciver rates walltes', res)
+    console.log("fetchReceiveWallets RESPONSE:", res.data);
 
-    return { success: true, data: res.data };
+    const list = Array.isArray(res.data?.data) ? res.data.data : [];
+    const wallets = list
+      .filter((w) => w?.address)
+      .map((w) => ({ ...w, id: `${w.coin}_${w.network}` }));
+
+    return { success: true, data: res.data, wallets };
   } catch (err) {
     console.error(
       "fetchReceiveWallets ERROR:",

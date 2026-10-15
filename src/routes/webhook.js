@@ -714,7 +714,7 @@ router.post("/callback", async (req, res) => {
                   return;
                 }
 
-                const wallets = walletsRes?.data?.data?.data || [];
+                const wallets = walletsRes.wallets || [];
 
                 if (!wallets.length) {
                   await sendWhatsApp(
@@ -731,11 +731,7 @@ router.post("/callback", async (req, res) => {
 
                   await sendWhatsApp(
                     from,
-                    `📥 *${w.coin} Receive Address*\n\n` +
-                      `Network: ${w.network}\n` +
-                      `Chain: ${w.chain}\n\n` +
-                      `📌 *Tap & hold to copy address:*\n` +
-                      `\`\`\`\n${w.address}\n\`\`\``,
+                    buildReceiveAddressText(w),
                     phone_number_id,
                   );
 
@@ -746,8 +742,8 @@ router.post("/callback", async (req, res) => {
                 // ✅ Multiple chains → show selection menu
                 const rows = wallets.slice(0, 10).map((w) => ({
                   id: `RECEIVE_WALLET_${w.id}`,
-                  title: `${w.chain}`,
-                  description: `${w.network}`,
+                  title: `${w.network}`.substring(0, 24),
+                  description: `${w.coin}`,
                 }));
 
                 await updateSession(from, {
@@ -798,11 +794,7 @@ router.post("/callback", async (req, res) => {
 
                 await sendWhatsApp(
                   from,
-                  `📥 *${wallet.coin} Receive Address*\n\n` +
-                    `Network: ${wallet.network}\n` +
-                    `Chain: ${wallet.chain}\n\n` +
-                    `📌 *Tap & hold to copy address:*\n` +
-                    `\`\`\`\n${wallet.address}\n\`\`\``,
+                  buildReceiveAddressText(wallet),
                   phone_number_id,
                 );
 
@@ -1427,7 +1419,7 @@ router.post("/callback", async (req, res) => {
                     break;
                   }
 
-                  const wallets = walletsRes?.data?.data?.data || [];
+                  const wallets = walletsRes.wallets || [];
                   if (!wallets.length) {
                     await sendWhatsApp(
                       from,
@@ -4980,7 +4972,7 @@ async function handleItemSelection({
         return;
       }
 
-      const wallets = walletsRes?.data?.data?.data || [];
+      const wallets = walletsRes.wallets || [];
 
       if (!wallets.length) {
         await sendWhatsApp(
@@ -4996,11 +4988,7 @@ async function handleItemSelection({
         const w = wallets[0];
         await sendWhatsApp(
           phone,
-          `📥 *${w.coin} Receive Address*\n\n` +
-            `Network: ${w.network}\n` +
-            `Chain: ${w.chain}\n\n` +
-            `📌 *Tap & hold to copy address:*\n` +
-            `\`\`\`\n${w.address}\n\`\`\``,
+          buildReceiveAddressText(w),
           phone_number_id,
         );
         await updateSession(phone, {
@@ -5021,8 +5009,8 @@ async function handleItemSelection({
         context: "RECEIVE_WALLET",
         items: wallets.map((w) => ({
           id: w.id,
-          title: w.chain,
-          description: w.network,
+          title: w.network,
+          description: w.coin,
         })),
         bodyText: `📥 Select the ${coin} network`,
         heading: `Select ${coin} network`,
@@ -5045,11 +5033,7 @@ async function handleItemSelection({
 
       await sendWhatsApp(
         phone,
-        `📥 *${wallet.coin} Receive Address*\n\n` +
-          `Network: ${wallet.network}\n` +
-          `Chain: ${wallet.chain}\n\n` +
-          `📌 *Tap & hold to copy address:*\n` +
-          `\`\`\`\n${wallet.address}\n\`\`\``,
+        buildReceiveAddressText(wallet),
         phone_number_id,
       );
 
@@ -5226,6 +5210,23 @@ async function sendPaginatedCountriesMenu(
       },
     },
     phone_number_id,
+  );
+}
+
+/**
+ * Address message for GET /crypto/receive items:
+ *   { coin, network, address, memo, txUrlPrefix }
+ * The memo line only appears when the network needs one — sending without
+ * it can lose the funds.
+ */
+function buildReceiveAddressText(w = {}) {
+  const memo = w.memo ? `🏷️ *Memo/Tag:* \`${w.memo}\`\n⚠️ Include this memo when sending, or the funds may be lost.\n\n` : "";
+  return (
+    `📥 *${w.coin} Receive Address*\n\n` +
+    `Network: ${w.network}\n\n` +
+    memo +
+    `📌 *Tap & hold to copy address:*\n` +
+    `\`\`\`\n${w.address}\n\`\`\``
   );
 }
 
@@ -5537,7 +5538,7 @@ async function routeToFlow(flow, from, phone_number_id, sessionData) {
         );
         return;
       }
-      const wallets = walletsRes?.data?.data?.data || [];
+      const wallets = walletsRes.wallets || [];
       if (!wallets.length) {
         await sendWhatsApp(
           from,
