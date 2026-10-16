@@ -45,7 +45,7 @@ import {
   executeSendCrypto,
 } from "../services/send.service.js";
 
-import { fetchRates } from "../services/rates.service.js";
+import { convertRate } from "../services/rates.service.js";
 import {
   requestChangePinOtp,
   changePinRequest,
@@ -2399,14 +2399,14 @@ router.post("/callback", async (req, res) => {
                   return;
                 }
 
-                const rateData = await fetchRates({
-                  fromCurrency: "naira",
-                  toCurrency: "USD",
+                const rateRes = await convertRate({
+                  fromCurrency: session.data.depositCurrency || "NGN",
+                  toCurrency: session.data.depositCoin || "USDT",
+                  amount: amountNgn,
+                  direction: 0,
                 });
 
-                console.log(rateData.data, "validate this");
-
-                if (!rateData?.data?.success || !rateData.data) {
+                if (!rateRes.success || !rateRes.data?.success || !rateRes.data?.data) {
                   await sendWhatsApp(
                     from,
                     "⚠️ Unable to retrieve exchange rates at the moment. Please try again shortly.",
@@ -2415,29 +2415,11 @@ router.post("/callback", async (req, res) => {
                   return;
                 }
 
-                const formattedUpdatedAt = rateData.data.data.updatedAt
-                  ? new Date(rateData.data.data.updatedAt).toLocaleString(
-                      "en-NG",
-                      {
-                        dateStyle: "medium",
-                        timeStyle: "short",
-                        timeZone: "Africa/Lagos",
-                      },
-                    )
-                  : "Just now";
-
-                const rateMessage = `
-💱 *Current Exchange Rate*
-
-• Currency Pair: ${rateData.data.data.fromCurrency} → ${rateData.data.data.toCurrency}
-• Buy Rate: ${rateData.data.data.buyRate}
-• Sell Rate: ${rateData.data.data.sellRate}
-• Base Rate: ${rateData.data.data.baseRate}
-
-🕒 Updated: ${formattedUpdatedAt}
-`.trim();
-
-                await sendWhatsApp(from, rateMessage, phone_number_id);
+                await sendWhatsApp(
+                  from,
+                  buildDepositEstimateText(rateRes.data.data, amountNgn),
+                  phone_number_id,
+                );
 
                 await updateSession(from, {
                   data: {
@@ -4227,7 +4209,7 @@ async function handlePinFlowSubmission({
       console.log(
         session.data.depositCurrency,
         session.data.depositAmount,
-        "AF944F0C-BA70-47C7-86DC-1BAD5A6AB4E4",
+        "9ae16e52-d562-4d8c-85ec-252ad247d0af",
         session.data.depositCoin,
         "CORR-${Date.now()",
         "IDEMPOTENCY-${Date.now()",
@@ -4235,7 +4217,7 @@ async function handlePinFlowSubmission({
       const depositResult = await depositCrypto({
         currency: session.data.depositCurrency,
         amountLocal: session.data.depositAmount,
-        channelId: "AF944F0C-BA70-47C7-86DC-1BAD5A6AB4E4",
+        channelId: "9ae16e52-d562-4d8c-85ec-252ad247d0af",
         coin: session.data.depositCoin,
         correlationId: `CORR-${Date.now()}`,
         idempotencyKey: `IDEMPOTENCY-${Date.now()}`,
@@ -5211,6 +5193,45 @@ async function sendPaginatedCountriesMenu(
     },
     phone_number_id,
   );
+}
+
+/**
+ * Rate message for POST /rates/convert (direction 0). Response `data`:
+ *   { fromCurrency, toCurrency, inputAmount, outputAmount, rateUsed, fee,
+ *     feePercentage, direction, rateTimestamp, expiresInSeconds }
+ * Only an estimate — the deposit itself quotes the final amount.
+ * Any field that's missing drops its line instead of printing "undefined".
+ */
+function buildDepositEstimateText(c = {}, amountEntered) {
+  const has = (v) => v !== undefined && v !== null && v !== "";
+  const from = (c.fromCurrency || "NGN").toUpperCase();
+  const to = (c.toCurrency || "USDT").toUpperCase();
+  const fiat = (v, opts) => {
+    const n = Number(v).toLocaleString("en-NG", opts);
+    return from === "NGN" ? `₦${n}` : `${n} ${from}`;
+  };
+  const paid = has(c.inputAmount) ? c.inputAmount : amountEntered;
+
+  const lines = [];
+  if (has(paid)) lines.push(`You pay: ${fiat(paid, { maximumFractionDigits: 2 })}`);
+  if (has(c.outputAmount)) lines.push(`You'll receive: ≈ ${c.outputAmount} ${to}`);
+  if (has(c.fee)) lines.push(`Fee: ${c.fee} ${to}`);
+  if (Number(c.rateUsed) > 0) {
+    lines.push(`Rate: 1 ${to} ≈ ${fiat(1 / Number(c.rateUsed), { maximumFractionDigits: 0 })}`);
+  }
+
+  let text = `💱 *Deposit Estimate*\n\n${lines.join("\n") || "Here's your estimate."}`;
+  if (has(c.rateTimestamp)) {
+    const at = new Date(c.rateTimestamp);
+    if (!isNaN(at)) {
+      text += `\n\n🕒 Rate as of: ${at.toLocaleString("en-NG", {
+        dateStyle: "medium",
+        timeStyle: "short",
+        timeZone: "Africa/Lagos",
+      })}`;
+    }
+  }
+  return text;
 }
 
 /**
