@@ -1,4 +1,4 @@
-// services/verify.service.js
+// services/rates.service.js
 import axios from "axios";
 import { getToken } from "./auth.service.js";
 import https from "https";
@@ -10,36 +10,49 @@ const httpsAgent = new https.Agent({
 
 const VIXA_API_BASE = process.env.VIXA_API_BASE || "https://api.usevixa.com/api/v1";
 
-export async function fetchRates({ 
+/**
+ * POST /rates/convert
+ * Body: { fromCurrency, toCurrency, amount, direction }
+ *   direction 0 = `amount` is in fromCurrency (what the user pays).
+ * Response `data`: { fromCurrency, toCurrency, inputAmount, outputAmount,
+ *   rateUsed, fee, feePercentage, direction, rateTimestamp, expiresInSeconds }
+ */
+export async function convertRate({
     fromCurrency,
     toCurrency,
-
+    amount,
+    direction = 0,
 }) {
     try {
-
         const token = getToken();
         if (!token) {
-            throw new Error("Missing auth token for fetching rates");
+            throw new Error("Missing auth token for rate conversion");
         }
 
-        const res = await axios.get(
-            `${VIXA_API_BASE}/rates/${fromCurrency}/${toCurrency}`,
+        const res = await axios.post(
+            `${VIXA_API_BASE}/rates/convert`,
+            {
+                fromCurrency: String(fromCurrency).toLowerCase(),
+                toCurrency: String(toCurrency).toLowerCase(),
+                amount,
+                direction,
+            },
             {
                 httpsAgent,
-                timeout: 750000, // request timeout
+                timeout: 30000,
                 headers: {
                     Authorization: `Bearer ${token}`,
                     "Content-Type": "application/json",
-                    Accept: "text/plain",
+                    Accept: "application/json",
                 },
             }
         );
 
-       console.log(res, 'supplying recent rates')
+        console.log("convertRate RESPONSE:", res.data);
 
         return { success: true, data: res.data };
     } catch (err) {
-        console.error("verifyNIN ERROR:", err?.response?.data || err?.message);
+        console.error("convertRate ERROR:", err?.response?.data || err?.message);
         return { success: false, error: err?.response?.data || err?.message };
     }
 }
