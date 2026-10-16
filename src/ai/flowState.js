@@ -189,11 +189,12 @@ export function describeFlowState(sessionData) {
           "In the SEND flow. Waiting for the destination blockchain wallet address.",
         rePrompt: "📩 Please paste the wallet address you're sending to:",
       },
-      ENTER_TAG: {
-        expecting: "tag",
+      AWAITING_SEND_CONFIRM: {
+        expecting: "confirmation",
+        committed: true,
         describe:
-          "In the SEND flow. Waiting for the recipient's VIXA tag or phone number.",
-        rePrompt: "👤 Please enter the recipient's VIXA tag or phone number:",
+          "In the SEND flow. A send quote has been shown and we are waiting for the user to accept or cancel it.",
+        rePrompt: "Please tap *Yes, Send* or *Cancel* above to continue.",
       },
       ENTER_PIN: {
         expecting: "pin",
