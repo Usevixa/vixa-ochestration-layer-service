@@ -42,6 +42,7 @@ import {
 import { confirmPayment } from "../services/confirmPayment.service.js";
 import {
   fetchSendSupportedCurrencies,
+  fetchSendQuote,
   executeSendCrypto,
 } from "../services/send.service.js";
 
@@ -1873,6 +1874,35 @@ router.post("/callback", async (req, res) => {
                 return;
               }
 
+              if (actionId === "SEND_CONFIRM_YES") {
+                if (!session.data?.send?.quoteId) {
+                  await sendWhatsApp(
+                    from,
+                    "⚠️ That quote is no longer available. Please start the send again.",
+                    phone_number_id,
+                  );
+                  await sendMainMenu(from, phone_number_id);
+                  return;
+                }
+                await updateSession(from, {
+                  data: {
+                    ...session.data,
+                    send: { ...session.data.send, step: "ENTER_PIN" },
+                  },
+                });
+                await triggerPinFlow(from, phone_number_id, "SEND");
+                return;
+              }
+
+              if (actionId === "SEND_CANCEL") {
+                await updateSession(from, {
+                  data: { ...session.data, send: null },
+                });
+                await sendWhatsApp(from, "❌ Send cancelled.", phone_number_id);
+                await sendMainMenu(from, phone_number_id);
+                return;
+              }
+
               if (actionId === "WITHDRAW_CANCEL") {
                 await updateSession(from, {
                   data: { ...session.data, withdraw: null },
@@ -2590,70 +2620,84 @@ router.post("/callback", async (req, res) => {
                 //   return;
                 // }
 
-                const needsTag = session.data.send.chain?.needTag;
+                // P2P: unchanged — straight to PIN.
+                if (isP2P) {
+                  await updateSession(from, {
+                    data: {
+                      ...session.data,
+                      send: { ...session.data.send, address, step: "ENTER_PIN" },
+                    },
+                  });
+                  await triggerPinFlow(from, phone_number_id, "SEND");
+                  return;
+                }
 
+                // External: quote first, then confirm, then PIN.
+                const { coin, amount, chain } = session.data.send;
+                const quoteRes = await fetchSendQuote({
+                  coin,
+                  chain: chain?.chain,
+                  amount,
+                  externalAddress: address,
+                });
+
+                if (!quoteRes.success || !quoteRes.data?.data?.quoteId) {
+                  const rawError =
+                    quoteRes.error?.message || "Unknown server error";
+                  const friendly = await humanizeError(
+                    rawError,
+                    "get a send quote",
+                  );
+                  await sendWhatsApp(from, friendly, phone_number_id);
+                  await updateSession(from, {
+                    data: { ...session.data, send: null },
+                  });
+                  await sendMainMenu(from, phone_number_id);
+                  return;
+                }
+
+                const q = quoteRes.data.data;
                 await updateSession(from, {
                   data: {
                     ...session.data,
                     send: {
                       ...session.data.send,
                       address,
-                      step: needsTag ? "ENTER_TAG" : "ENTER_PIN",
+                      quote: q,
+                      quoteId: q.quoteId,
+                      // Made once per quote so a retried execute is the same send.
+                      idempotencyKey: `SEND-${randomUUID()}`,
+                      step: "AWAITING_SEND_CONFIRM",
                     },
                   },
                 });
 
-                if (needsTag) {
-                  await sendWhatsApp(
-                    from,
-                    "🏷️ Enter destination tag / memo (required for this network)",
-                    phone_number_id,
-                  );
-                  return;
-                }
-
-                // await sendWhatsApp(
-                //   from,
-                //   "🔐 Enter your *PIN* to confirm this transfer",
-                //   phone_number_id,
-                // );
-                await triggerPinFlow(from, phone_number_id, "SEND");
-
-                return;
-              }
-
-              if (session.data?.send?.step === "ENTER_TAG") {
-                const tag = msg.text?.body?.trim();
-
-                if (!tag) {
-                  await sendWhatsApp(
-                    from,
-                    "⚠️ Tag is required.",
-                    phone_number_id,
-                  );
-                  return;
-                }
-
-                await updateSession(from, {
-                  data: {
-                    ...session.data,
-                    send: {
-                      ...session.data.send,
-                      tag,
-                      step: "ENTER_PIN",
+                await sendWhatsApp(
+                  from,
+                  {
+                    type: "interactive",
+                    interactive: {
+                      type: "button",
+                      body: { text: buildSendQuoteText(q, address) },
+                      action: {
+                        buttons: [
+                          {
+                            type: "reply",
+                            reply: { id: "SEND_CONFIRM_YES", title: "Yes, Send" },
+                          },
+                          {
+                            type: "reply",
+                            reply: { id: "SEND_CANCEL", title: "Cancel" },
+                          },
+                        ],
+                      },
                     },
                   },
-                });
-
-                // await sendWhatsApp(
-                //   from,
-                //   "🔐 Enter your *PIN* to confirm this transfer",
-                //   phone_number_id,
-                // );
-                await triggerPinFlow(from, phone_number_id, "SEND");
-
+                  phone_number_id,
+                );
                 return;
               }
+
 
               // if (session.data?.send?.step === "ENTER_PIN") {
               //   const pin = msg.text?.body?.trim();
@@ -4360,7 +4404,8 @@ async function handlePinFlowSubmission({
     // SEND CRYPTO — PIN to authorize send
     // ─────────────────────────────────────────────
     case "SEND": {
-      const { coin, amount, address, chain, type } = session.data.send;
+      const { coin, amount, address, chain, type, quoteId, idempotencyKey } =
+        session.data.send;
 
       const sendRes = await executeSendCrypto({
         type,
@@ -4370,6 +4415,8 @@ async function handlePinFlowSubmission({
         phoneNumber: phone,
         externalAddress: address,
         pin,
+        quoteId,
+        idempotencyKey,
       });
 
       if (!sendRes.success) {
@@ -4381,7 +4428,9 @@ async function handlePinFlowSubmission({
 
       await sendWhatsApp(
         phone,
-        `✅ *Transfer Successful!*\n\n${amount} ${coin} sent\nTo: ${address}\n\n🚀 Transaction submitted`,
+        type === "P2P"
+          ? `✅ *Transfer Successful!*\n\n${amount} ${coin} sent\nTo: ${address}\n\n🚀 Transaction submitted`
+          : buildSendSubmittedText(sendRes.data?.data, address),
         phone_number_id,
       );
       await updateSession(phone, { data: { ...session.data, send: null } });
@@ -5057,6 +5106,64 @@ async function handleItemSelection({
       await sendMainMenu(phone, phone_number_id);
     }
   }
+}
+
+const shortAddress = (a = "") =>
+  a.length > 14 ? `${a.slice(0, 6)}…${a.slice(-4)}` : a;
+const hasValue = (v) => v !== undefined && v !== null && v !== "";
+const sumFees = (...fees) => {
+  const list = fees.filter(hasValue).map(Number);
+  return list.length ? Number(list.reduce((a, b) => a + b, 0).toFixed(8)) : null;
+};
+
+/**
+ * Quote message for POST /crypto/send/quote. Response `data`:
+ *   { quoteId, coin, network, amount, networkFee, vixaFee, total, totalDebit, expiresAt }
+ * Any field that's missing drops its line instead of printing "undefined".
+ */
+function buildSendQuoteText(q = {}, address) {
+  const coin = q.coin || "";
+  const lines = [];
+  if (hasValue(q.amount)) lines.push(`Sending: ${q.amount} ${coin}`.trim());
+  if (hasValue(q.network)) lines.push(`Network: ${q.network}`);
+  if (address) lines.push(`To: ${shortAddress(address)}`);
+  const fees = sumFees(q.vixaFee, q.networkFee);
+  if (fees !== null) lines.push(`Fees: ${fees} ${coin}`.trim());
+  const debit = hasValue(q.totalDebit) ? q.totalDebit : q.total;
+  if (hasValue(debit)) lines.push(`Total from your balance: ${debit} ${coin}`.trim());
+  if (hasValue(q.expiresAt)) {
+    const at = new Date(q.expiresAt);
+    if (!isNaN(at)) {
+      lines.push(
+        `Expires: ${at.toLocaleTimeString("en-NG", {
+          hour: "2-digit",
+          minute: "2-digit",
+          hour12: true,
+          timeZone: "Africa/Lagos",
+        })}`,
+      );
+    }
+  }
+  return `📤 *Send Quote*\n\n${lines.join("\n") || "Your quote is ready."}\n\nDo you want to send?`;
+}
+
+/**
+ * Success message for POST /crypto/send (onchain). Response `data`:
+ *   { sendId, refId, status, coin, network, amount, networkFee, vixaFee, heldAmount }
+ */
+function buildSendSubmittedText(r = {}, address) {
+  const coin = r?.coin || "";
+  const lines = [];
+  if (hasValue(r?.amount)) lines.push(`Amount: ${r.amount} ${coin}`.trim());
+  if (hasValue(r?.network)) lines.push(`Network: ${r.network}`);
+  const fees = sumFees(r?.vixaFee, r?.networkFee);
+  if (fees !== null) lines.push(`Fees: ${fees} ${coin}`.trim());
+  if (hasValue(r?.heldAmount)) lines.push(`Total debited: ${r.heldAmount} ${coin}`.trim());
+  if (address) lines.push(`To: ${shortAddress(address)}`);
+  if (hasValue(r?.refId)) lines.push(`Ref: ${r.refId}`);
+  if (hasValue(r?.status)) lines.push(`Status: ${r.status}`);
+  const body = lines.length ? `${lines.join("\n")}\n\n` : "";
+  return `✅ *Send Submitted*\n\n${body}🚀 Your crypto is on its way!`;
 }
 
 async function sendPaginatedSwapCoinsMenu(
