@@ -4227,7 +4227,7 @@ async function handlePinFlowSubmission({
       console.log(
         session.data.depositCurrency,
         session.data.depositAmount,
-        "AF944F0C-BA70-47C7-86DC-1BAD5A6AB4E4",
+        "9ae16e52-d562-4d8c-85ec-252ad247d0af",
         session.data.depositCoin,
         "CORR-${Date.now()",
         "IDEMPOTENCY-${Date.now()",
@@ -4235,7 +4235,7 @@ async function handlePinFlowSubmission({
       const depositResult = await depositCrypto({
         currency: session.data.depositCurrency,
         amountLocal: session.data.depositAmount,
-        channelId: "AF944F0C-BA70-47C7-86DC-1BAD5A6AB4E4",
+        channelId: "9ae16e52-d562-4d8c-85ec-252ad247d0af",
         coin: session.data.depositCoin,
         correlationId: `CORR-${Date.now()}`,
         idempotencyKey: `IDEMPOTENCY-${Date.now()}`,
