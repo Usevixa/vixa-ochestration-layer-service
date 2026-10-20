@@ -139,6 +139,13 @@ export function describeFlowState(sessionData) {
           limits ? `\n\nMin: ${limits.minAmount}\nMax: ${limits.maxAmount}` : ""
         }`,
       },
+      AWAITING_SWAP_CONFIRM: {
+        expecting: "confirmation",
+        committed: true,
+        describe:
+          "In the SWAP flow. A quote has been shown and we are waiting for the user to accept or cancel it.",
+        rePrompt: "Please tap *Yes, Swap* or *Cancel* above to continue.",
+      },
       AWAITING_SWAP_PIN: {
         expecting: "pin",
         sealed: true,

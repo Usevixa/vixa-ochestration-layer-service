@@ -681,23 +681,33 @@ router.post("/callback", async (req, res) => {
                     ...session.data,
                     swap: {
                       ...session.data.swap,
-                      step: "AWAITING_SWAP_PIN",
+                      step: "AWAITING_SWAP_CONFIRM",
                       toCoin,
                       quote: quote.data.data,
+                      quoteId: quote.data.data?.quoteId ?? null,
                     },
                   },
                 });
 
                 await sendWhatsApp(
                   from,
-                  `🔄 *Swap Ready*\n\n` +
-                    `From: ${amount} ${session.data.swap.fromCoin}\n` +
-                    `To: ${quote.data.data.toAmount} ${toCoin}\n` +
-                    `Fee: ${quote.data.data.fee}\n\n` +
-                    `🔐 Please enter your *PIN* to authorize this swap.`,
+                  {
+                    type: "interactive",
+                    interactive: {
+                      type: "button",
+                      body: {
+                        text: buildSwapQuoteText(quote.data.data, { amount, fromCoin: session.data.swap.fromCoin, toCoin }),
+                      },
+                      action: {
+                        buttons: [
+                          { type: "reply", reply: { id: "SWAP_CONFIRM_YES", title: "Yes, Swap" } },
+                          { type: "reply", reply: { id: "SWAP_CANCEL", title: "Cancel" } },
+                        ],
+                      },
+                    },
+                  },
                   phone_number_id,
                 );
-                await triggerPinFlow(from, phone_number_id, "SWAP");
                 return;
               }
 
@@ -1899,6 +1909,35 @@ router.post("/callback", async (req, res) => {
                   data: { ...session.data, send: null },
                 });
                 await sendWhatsApp(from, "❌ Send cancelled.", phone_number_id);
+                await sendMainMenu(from, phone_number_id);
+                return;
+              }
+
+              if (actionId === "SWAP_CONFIRM_YES") {
+                if (!session.data?.swap?.quote) {
+                  await sendWhatsApp(
+                    from,
+                    "⚠️ That quote is no longer available. Please start the swap again.",
+                    phone_number_id,
+                  );
+                  await sendMainMenu(from, phone_number_id);
+                  return;
+                }
+                await updateSession(from, {
+                  data: {
+                    ...session.data,
+                    swap: { ...session.data.swap, step: "AWAITING_SWAP_PIN" },
+                  },
+                });
+                await triggerPinFlow(from, phone_number_id, "SWAP");
+                return;
+              }
+
+              if (actionId === "SWAP_CANCEL") {
+                await updateSession(from, {
+                  data: { ...session.data, swap: null },
+                });
+                await sendWhatsApp(from, "❌ Swap cancelled.", phone_number_id);
                 await sendMainMenu(from, phone_number_id);
                 return;
               }
@@ -4368,13 +4407,14 @@ async function handlePinFlowSubmission({
     // SWAP EXECUTE — PIN to authorize swap
     // ─────────────────────────────────────────────
     case "SWAP": {
-      const { fromCoin, amount, toCoin } = session.data.swap;
+      const { fromCoin, amount, toCoin, quoteId, quote } = session.data.swap;
 
       const swapResult = await executeSwap({
         fromCoin,
         fromAmount: amount,
         toCoin,
         pin,
+        quoteId,
       });
 
       if (!swapResult.success) {
@@ -4387,7 +4427,7 @@ async function handlePinFlowSubmission({
 
       await sendWhatsApp(
         phone,
-        `✅ *Swap Successful!*\n\n${amount} ${fromCoin} → ${swapResult.data.data.toAmount} ${toCoin}\n\n🎉 Your wallet has been updated.`,
+        buildSwapResultText(swapResult.data?.data, { amount, fromCoin, toCoin, quote }),
         phone_number_id,
       );
       await updateSession(phone, { data: { ...session.data, swap: null } });
@@ -4864,23 +4904,33 @@ async function handleItemSelection({
           ...session.data,
           swap: {
             ...session.data.swap,
-            step: "AWAITING_SWAP_PIN",
+            step: "AWAITING_SWAP_CONFIRM",
             toCoin,
             quote: quote.data.data,
+            quoteId: quote.data.data?.quoteId ?? null,
           },
         },
       });
 
       await sendWhatsApp(
         phone,
-        `🔄 *Swap Ready*\n\n` +
-          `From: ${amount} ${fromCoin}\n` +
-          `To: ${quote.data.data.toAmount} ${toCoin}\n` +
-          `Fee: ${quote.data.data.fee}\n\n` +
-          `🔐 Please enter your *PIN* to authorize this swap.`,
+        {
+          type: "interactive",
+          interactive: {
+            type: "button",
+            body: {
+              text: buildSwapQuoteText(quote.data.data, { amount, fromCoin: fromCoin, toCoin }),
+            },
+            action: {
+              buttons: [
+                { type: "reply", reply: { id: "SWAP_CONFIRM_YES", title: "Yes, Swap" } },
+                { type: "reply", reply: { id: "SWAP_CANCEL", title: "Cancel" } },
+              ],
+            },
+          },
+        },
         phone_number_id,
       );
-      await triggerPinFlow(phone, phone_number_id, "SWAP");
       return;
     }
 
@@ -5164,6 +5214,63 @@ function buildSendSubmittedText(r = {}, address) {
   if (hasValue(r?.status)) lines.push(`Status: ${r.status}`);
   const body = lines.length ? `${lines.join("\n")}\n\n` : "";
   return `✅ *Send Submitted*\n\n${body}🚀 Your crypto is on its way!`;
+}
+
+/**
+ * Quote message for GET /swap/quote. Response `data`:
+ *   { fromCoin, fromAmount, toCoin, toAmount, swapPrice, fee, expiresAt,
+ *     providerFee, vixaFee, quoteId }
+ * Any field that's missing drops its line instead of printing "undefined".
+ */
+function buildSwapQuoteText(q = {}, ctx = {}) {
+  const has = (v) => v !== undefined && v !== null && v !== "";
+  const from = q.fromCoin || ctx.fromCoin || "";
+  const to = q.toCoin || ctx.toCoin || "";
+  const fromAmount = has(q.fromAmount) ? q.fromAmount : ctx.amount;
+  const lines = [];
+  if (has(fromAmount)) lines.push(`From: ${fromAmount} ${from}`.trim());
+  if (has(q.toAmount)) lines.push(`To: ≈ ${q.toAmount} ${to}`.trim());
+  // Fee currency isn't stated by the API, so no coin label.
+  if (has(q.fee)) lines.push(`Fee: ${Number(Number(q.fee).toFixed(8))}`);
+  if (has(q.expiresAt)) {
+    const at = new Date(q.expiresAt);
+    if (!isNaN(at)) {
+      lines.push(
+        `Expires: ${at.toLocaleTimeString("en-NG", {
+          hour: "2-digit",
+          minute: "2-digit",
+          hour12: true,
+          timeZone: "Africa/Lagos",
+        })}`,
+      );
+    }
+  }
+  return `🔄 *Swap Quote*\n\n${lines.join("\n") || "Your quote is ready."}\n\nDo you want to swap?`;
+}
+
+/**
+ * Result message for POST /swap. Response `data`:
+ *   { fromCoin, toCoin, fromAmount, toAmount, fee, status, oxReference, swapId, ... }
+ * Falls back to the quote's toAmount if the response has none.
+ */
+function buildSwapResultText(r = {}, ctx = {}) {
+  const has = (v) => v !== undefined && v !== null && v !== "";
+  const from = r?.fromCoin || ctx.fromCoin || "";
+  const to = r?.toCoin || ctx.toCoin || "";
+  const fromAmount = has(r?.fromAmount) && Number(r.fromAmount) ? r.fromAmount : ctx.amount;
+  const toAmount = has(r?.toAmount) && Number(r.toAmount) ? r.toAmount : ctx.quote?.toAmount;
+  const status = has(r?.status) ? String(r.status) : "";
+  const done = !status || /complet|success/i.test(status);
+
+  let text = done ? "✅ *Swap Successful!*\n\n" : "✅ *Swap Submitted*\n\n";
+  if (has(fromAmount) && has(toAmount)) text += `${fromAmount} ${from} → ${toAmount} ${to}\n`;
+  if (!done) text += `Status: ${status}\n`;
+  const ref = r?.oxReference || r?.swapId;
+  if (has(ref)) text += `Ref: ${ref}\n`;
+  text += done
+    ? "\n🎉 Your wallet has been updated."
+    : "\n⏳ We'll update your wallet once it's done.";
+  return text;
 }
 
 async function sendPaginatedSwapCoinsMenu(
