@@ -11,6 +11,18 @@ const httpsAgent = new https.Agent({
 const VIXA_API_BASE = process.env.VIXA_API_BASE || "https://api.usevixa.com/api/v1";
 
 /**
+ * The rates API names currencies its own way (see GET /rates/pairs):
+ * NGN is "naira", while coins like USDT are their lowercase ticker.
+ * "ngn" now returns "No rate available".
+ */
+const RATE_CURRENCY_NAMES = { ngn: "naira" };
+
+function rateCurrencyName(code) {
+    const lower = String(code || "").toLowerCase();
+    return RATE_CURRENCY_NAMES[lower] || lower;
+}
+
+/**
  * POST /rates/convert
  * Body: { fromCurrency, toCurrency, amount, direction }
  *   direction 0 = `amount` is in fromCurrency (what the user pays).
@@ -32,8 +44,8 @@ export async function convertRate({
         const res = await axios.post(
             `${VIXA_API_BASE}/rates/convert`,
             {
-                fromCurrency: String(fromCurrency).toLowerCase(),
-                toCurrency: String(toCurrency).toLowerCase(),
+                fromCurrency: rateCurrencyName(fromCurrency),
+                toCurrency: rateCurrencyName(toCurrency),
                 amount,
                 direction,
             },
