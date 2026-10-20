@@ -5418,7 +5418,9 @@ async function sendPaginatedCountriesMenu(
  */
 function buildDepositEstimateText(c = {}, amountEntered) {
   const has = (v) => v !== undefined && v !== null && v !== "";
-  const from = (c.fromCurrency || "NGN").toUpperCase();
+  // The API answers with "NAIRA"; show it as NGN (₦).
+  let from = (c.fromCurrency || "NGN").toUpperCase();
+  if (from === "NAIRA") from = "NGN";
   const to = (c.toCurrency || "USDT").toUpperCase();
   const fiat = (v, opts) => {
     const n = Number(v).toLocaleString("en-NG", opts);
