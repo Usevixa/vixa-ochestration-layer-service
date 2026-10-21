@@ -115,7 +115,6 @@ export function describeFlowState(sessionData) {
   // ── Swap ───────────────────────────────────────────────────────
   if (d.swap?.step) {
     const from = d.swap.fromCoin;
-    const limits = d.swap.fromCoinLimits;
     const map = {
       SELECT_FROM: {
         expecting: "selection",
@@ -132,12 +131,8 @@ export function describeFlowState(sessionData) {
       },
       ENTER_AMOUNT: {
         expecting: "amount",
-        describe: `In the SWAP flow. Waiting for how much ${from || "of the selected coin"} the user wants to swap${
-          limits ? ` (min ${limits.minAmount}, max ${limits.maxAmount})` : ""
-        }.`,
-        rePrompt: `💰 Enter the amount of *${from || "the coin"}* you want to swap${
-          limits ? `\n\nMin: ${limits.minAmount}\nMax: ${limits.maxAmount}` : ""
-        }`,
+        describe: `In the SWAP flow. Waiting for how much ${from || "of the selected coin"} the user wants to swap.`,
+        rePrompt: `💰 Enter the amount of *${from || "the coin"}* you want to swap:`,
       },
       AWAITING_SWAP_CONFIRM: {
         expecting: "confirmation",
