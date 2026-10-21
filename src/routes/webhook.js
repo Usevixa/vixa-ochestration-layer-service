@@ -628,7 +628,7 @@ router.post("/callback", async (req, res) => {
 
                 await sendWhatsApp(
                   from,
-                  `💰 Enter amount of *${coin}* to swap\n\nMin: ${selected.minAmount}\nMax: ${selected.maxAmount}`,
+                  `💰 Enter amount of *${coin}* to swap`,
                   phone_number_id,
                 );
 
@@ -1569,7 +1569,7 @@ router.post("/callback", async (req, res) => {
                     items: selectedCoins.map((c) => ({
                       id: c.coin,
                       title: c.coin,
-                      description: `Min: ${c.minAmount}, Max: ${c.maxAmount}`,
+                      description: c.chain || "Swap",
                     })),
                     bodyText: "🔄 Select the coin you want to swap from",
                     heading: "Select the coin you want to swap from",
@@ -2505,21 +2505,13 @@ router.post("/callback", async (req, res) => {
 
               if (session.data?.swap?.step === "ENTER_AMOUNT") {
                 const amount = parseFloat(msg.text?.body?.trim());
-                const { minAmount, maxAmount } = session.data.swap.fromCoinLimits;
 
-                if (isNaN(amount)) {
+                // No min/max: the swap provider sets none (the API sends 0/0).
+                // Anything else the backend rejects comes back from the quote.
+                if (isNaN(amount) || amount <= 0) {
                   await sendWhatsApp(
                     from,
-                    "⚠️ Enter a valid number.",
-                    phone_number_id,
-                  );
-                  return;
-                }
-
-                if (amount < minAmount || amount > maxAmount) {
-                  await sendWhatsApp(
-                    from,
-                    `❌ Amount must be between ${minAmount} and ${maxAmount}`,
+                    "⚠️ Enter a valid amount greater than 0.",
                     phone_number_id,
                   );
                   return;
@@ -2553,7 +2545,7 @@ router.post("/callback", async (req, res) => {
                   items: toCoins.map((c) => ({
                     id: c.coin,
                     title: c.coin,
-                    description: `Min: ${c.minAmount}, Max: ${c.maxAmount}`,
+                    description: c.chain || "Swap",
                   })),
                   bodyText: "➡️ Select the coin you want to receive",
                   heading: "Select the coin you want to receive",
@@ -4875,7 +4867,7 @@ async function handleItemSelection({
 
       await sendWhatsApp(
         phone,
-        `💰 Enter amount of *${selectedId}* to swap\n\nMin: ${selected.minAmount}\nMax: ${selected.maxAmount}`,
+        `💰 Enter amount of *${selectedId}* to swap`,
         phone_number_id,
       );
       return;
@@ -5289,7 +5281,7 @@ async function sendPaginatedSwapCoinsMenu(
   const rows = currentChunk.map((c) => ({
     id: `SWAP_${direction}_${c.coin}`,
     title: c.coin,
-    description: `Min: ${c.minAmount}, Max: ${c.maxAmount}`,
+    description: c.chain || "Swap",
   }));
 
   if (endIndex < coinsList.length) {
@@ -5827,7 +5819,7 @@ async function routeToFlow(flow, from, phone_number_id, sessionData) {
         items: selectedCoins.map((c) => ({
           id: c.coin,
           title: c.coin,
-          description: `Min: ${c.minAmount}, Max: ${c.maxAmount}`,
+          description: c.chain || "Swap",
         })),
         bodyText: "🔄 Select the coin you want to swap from",
         heading: "Select the coin you want to swap from",
