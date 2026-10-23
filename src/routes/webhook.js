@@ -221,6 +221,120 @@ async function loadSwapCoins(fromCoin) {
   return { coins, error: null };
 }
 
+/**
+ * Start a send at the coin step. `type` is "EXTERNAL" (on-chain) or "P2P".
+ *
+ * P2P (send to another Vixa user) is switched off by product decision —
+ * every transfer now goes on-chain — so all callers pass "EXTERNAL". The
+ * P2P path (phone number step, p2p payload) is still in place below.
+ */
+async function startSend(to, phone_number_id, type = "EXTERNAL") {
+  const coinsRes = await fetchSendSupportedCurrencies();
+
+  if (!coinsRes.success) {
+    // The reason was previously swallowed — log it so the next
+    // occurrence is diagnosable from Seq rather than a screenshot.
+    console.error(
+      "SEND: /crypto/supported-currencies failed —",
+      JSON.stringify(coinsRes.error)?.slice(0, 400),
+    );
+    await sendWhatsApp(
+      to,
+      "⚠️ Unable to load supported coins right now. Please try again shortly.",
+      phone_number_id,
+    );
+    return;
+  }
+
+  const { list: rawCoins, reason: coinsReason } = resolveCurrencies(
+    coinsRes.data,
+    "crypto/supported-currencies",
+  );
+  const coins = normalizeCoins(rawCoins);
+
+  if (coinsReason || !coins.length) {
+    await sendWhatsApp(
+      to,
+      "⚠️ No coins are available to send right now. Please try again shortly.",
+      phone_number_id,
+    );
+    return;
+  }
+
+  const uniqueCoins = Array.from(
+    new Map(coins.map((c) => [c.coin, c])).values(),
+  );
+
+  const session = await getSession(to);
+  await updateSession(to, {
+    data: {
+      ...session.data,
+      send: { step: "SELECT_COIN", type, coins },
+    },
+  });
+
+  await triggerItemSelectionFlow(to, phone_number_id, {
+    context: "SEND_COIN",
+    items: uniqueCoins.map((c) => ({
+      id: c.coin,
+      title: c.coin,
+      description:
+        type === "P2P"
+          ? "Send to Vixa user"
+          : `${c.chains?.length || 1} network(s)`,
+    })),
+    bodyText: "📤 Select the coin you want to send",
+    heading: "Select coin to send",
+    label: "Coin",
+    cta: "Select Coin",
+  });
+}
+
+/**
+ * The "Who are you sending to?" menu. Unused while P2P is switched off —
+ * kept so P2P can come back: uncomment the P2P row and call this from
+ * SEND_CRYPTO and routeToFlow("SEND") instead of startSend().
+ */
+// eslint-disable-next-line no-unused-vars
+async function sendRecipientTypeMenu(to, phone_number_id) {
+  const session = await getSession(to);
+  await updateSession(to, {
+    data: { ...session.data, send: { step: "SELECT_SEND_TYPE" } },
+  });
+  await sendWhatsApp(
+    to,
+    {
+      type: "interactive",
+      interactive: {
+        type: "list",
+        body: { text: "Who are you sending to? 😊" },
+        action: {
+          button: "Choose recipient",
+          sections: [
+            {
+              title: "Send Options",
+              rows: [
+                // P2P switched off — every transfer goes on-chain now.
+                // {
+                //   id: "SEND_TYPE_P2P",
+                //   title: "Another Vixa user",
+                //   description: "Send to a phone number",
+                // },
+                {
+                  id: "SEND_TYPE_EXTERNAL",
+                  title: "External wallet",
+                  description: "Send to blockchain address",
+                },
+              ],
+            },
+          ],
+        },
+      },
+    },
+    phone_number_id,
+  );
+}
+
 // function isFreeText(msg, session) {
 //   if (msg.type !== "text") return false;
 //   if (session.data?.expectedInput) return false;
@@ -1041,72 +1155,20 @@ router.post("/callback", async (req, res) => {
                 return;
               }
 
+              // Old "Who are you sending to?" menus are still in users' chats.
+              // P2P is switched off, so a P2P tap goes to the external flow.
               if (
                 actionId === "SEND_TYPE_P2P" ||
                 actionId === "SEND_TYPE_EXTERNAL"
               ) {
-                const type = actionId === "SEND_TYPE_P2P" ? "P2P" : "EXTERNAL";
-
-                const coinsRes = await fetchSendSupportedCurrencies();
-
-                if (!coinsRes.success) {
-                  // The reason was previously swallowed — log it so the next
-                  // occurrence is diagnosable from Seq rather than a screenshot.
-                  console.error(
-                    "SEND: /crypto/supported-currencies failed —",
-                    JSON.stringify(coinsRes.error)?.slice(0, 400),
-                  );
+                if (actionId === "SEND_TYPE_P2P") {
                   await sendWhatsApp(
                     from,
-                    "⚠️ Unable to load supported coins right now. Please try again shortly.",
+                    "Sending to another Vixa user isn't available right now. You can send to an external wallet instead 👇",
                     phone_number_id,
                   );
-                  return;
                 }
-
-                const { list: rawCoins, reason: coinsReason } = resolveCurrencies(
-                  coinsRes.data,
-                  "crypto/supported-currencies",
-                );
-
-                const coins = normalizeCoins(rawCoins);
-
-                if (coinsReason || !coins.length) {
-                  await sendWhatsApp(
-                    from,
-                    "⚠️ No coins are available to send right now. Please try again shortly.",
-                    phone_number_id,
-                  );
-                  return;
-                }
-
-                const uniqueCoins = Array.from(
-                  new Map(coins.map((c) => [c.coin, c])).values(),
-                );
-
-                await updateSession(from, {
-                  data: {
-                    ...session.data,
-                    send: { step: "SELECT_COIN", type, coins },
-                  },
-                });
-
-                await triggerItemSelectionFlow(from, phone_number_id, {
-                  context: "SEND_COIN",
-                  items: uniqueCoins.map((c) => ({
-                    id: c.coin,
-                    title: c.coin,
-                    description:
-                      type === "P2P"
-                        ? "Send to Vixa user"
-                        : `${c.chains?.length || 1} network(s)`,
-                  })),
-                  bodyText: "📤 Select the coin you want to send",
-                  heading: "Select coin to send",
-                  label: "Coin",
-                  cta: "Select Coin",
-                });
-
+                await startSend(from, phone_number_id, "EXTERNAL");
                 return;
               }
               // --- WITHDRAWAL: TYPE & COIN & BANK SELECTION ---
@@ -1321,51 +1383,10 @@ router.post("/callback", async (req, res) => {
 
               switch (actionId) {
                 case "SEND_CRYPTO": {
-                  // route to buy flow
-                  const session = await getSession(from);
-
-                  await updateSession(from, {
-                    data: {
-                      ...session.data,
-                      send: {
-                        step: "SELECT_SEND_TYPE",
-                      },
-                    },
-                  });
-
-                  await sendWhatsApp(
-                    from,
-                    {
-                      type: "interactive",
-                      interactive: {
-                        type: "list",
-                        body: {
-                          text: "Who are you sending to? 😊",
-                        },
-                        action: {
-                          button: "Choose recipient",
-                          sections: [
-                            {
-                              title: "Send Options",
-                              rows: [
-                                {
-                                  id: "SEND_TYPE_P2P",
-                                  title: "Another Vixa user",
-                                  description: "Send to a phone number",
-                                },
-                                {
-                                  id: "SEND_TYPE_EXTERNAL",
-                                  title: "External wallet",
-                                  description: "Send to blockchain address",
-                                },
-                              ],
-                            },
-                          ],
-                        },
-                      },
-                    },
-                    phone_number_id,
-                  );
+                  // P2P is switched off, so there's no recipient-type question:
+                  // go straight to the external coin list. To bring P2P back,
+                  // call sendRecipientTypeMenu() here instead.
+                  await startSend(from, phone_number_id, "EXTERNAL");
 
                   // NOTE: the coin lookup that used to live here was dead — every
                   // line that consumed it is commented out below, and the coins
@@ -5721,40 +5742,8 @@ async function routeToFlow(flow, from, phone_number_id, sessionData) {
       break;
     }
     case "SEND": {
-      await updateSession(from, {
-        data: { ...sessionData, send: { step: "SELECT_SEND_TYPE" } },
-      });
-      await sendWhatsApp(
-        from,
-        {
-          type: "interactive",
-          interactive: {
-            type: "list",
-            body: { text: "Who are you sending to? 😊" },
-            action: {
-              button: "Choose recipient",
-              sections: [
-                {
-                  title: "Send Options",
-                  rows: [
-                    {
-                      id: "SEND_TYPE_P2P",
-                      title: "Another Vixa user",
-                      description: "Send to a phone number",
-                    },
-                    {
-                      id: "SEND_TYPE_EXTERNAL",
-                      title: "External wallet",
-                      description: "Send to blockchain address",
-                    },
-                  ],
-                },
-              ],
-            },
-          },
-        },
-        phone_number_id,
-      );
+      // P2P is switched off — see SEND_CRYPTO in the menu handler.
+      await startSend(from, phone_number_id, "EXTERNAL");
       break;
     }
     case "RECEIVE": {

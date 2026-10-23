@@ -165,7 +165,7 @@ export function describeFlowState(sessionData) {
       SELECT_SEND_TYPE: {
         expecting: "selection",
         describe:
-          "In the SEND flow. Waiting for the user to choose whether they are sending to another VIXA user or to an external wallet.",
+          "In the SEND flow. Waiting for the user to choose a recipient type (only external wallets are available).",
         rePrompt: "Please tap above and choose who you're sending to.",
       },
       SELECT_COIN: {
