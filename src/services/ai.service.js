@@ -27,7 +27,7 @@ const FLOW_CATALOGUE = `
 - DEPOSIT — buy USDT with Nigerian Naira. The user funds their VIXA wallet from cash/bank. Triggered by "deposit", "fund my wallet", "buy usdt", "top up", "naira to dollar".
 - WITHDRAW — cash out crypto to a bank account or mobile money. Triggered by "withdraw", "cash out", "sell my usdt", "send to my bank", "usdt to naira".
 - SWAP — exchange one crypto for another inside VIXA (e.g. BTC → USDT). Triggered by "swap", "convert btc to usdt".
-- SEND — send crypto out to another VIXA user or an external blockchain address.
+- SEND — send crypto out to an external blockchain wallet address. (Sending to another VIXA user by phone number is not available.)
 - RECEIVE — show the user their own deposit/receiving wallet address so someone else can send them crypto.
 - BALANCE — show current wallet balances.
 - SUPPORT — contact the VIXA support team.
