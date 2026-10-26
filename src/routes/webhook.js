@@ -19,6 +19,10 @@ import { depositCrypto } from "../services/deposit.service.js";
 import { randomUUID } from "node:crypto";
 import { fetchWalletBalances } from "../services/wallet.service.js";
 import { fetchReceiveWallets } from "../services/recieve.service.js";
+import {
+  getSupportedCoins,
+  TRANSACTION_TYPES,
+} from "../services/supportedCurrencies.service.js";
 import { humanizeError } from "../services/ai.service.js";
 import { resolveIntent } from "../ai/intentRouter.js";
 import {
@@ -27,7 +31,6 @@ import {
   voiceAllowed,
 } from "../ai/flowState.js";
 import {
-  fetchSwapCurrencies,
   fetchSwapQuote,
   executeSwap,
 } from "../services/swap.service.js";
@@ -41,7 +44,6 @@ import {
 } from "../services/withdrawal.service.js";
 import { confirmPayment } from "../services/confirmPayment.service.js";
 import {
-  fetchSendSupportedCurrencies,
   fetchSendQuote,
   executeSendCrypto,
 } from "../services/send.service.js";
@@ -57,11 +59,6 @@ import logger from "../lib/logger.js";
 
 import { decryptRequest, encryptResponse } from "../utils/decrypt.js";
 
-import {
-  resolveCurrencies,
-  readCoin,
-  normalizeCoins,
-} from "../utils/apiShape.js";
 import { verifyMetaSignature } from "../utils/verifySignature.js";
 import { markMessageSeen } from "../utils/messageDedup.js";
 import {
@@ -122,65 +119,17 @@ function normalizePhone(phone) {
   return `+${phone}`;
 }
 
-const PREFERRED_COINS = [
-  "BTC",
-  "ETH",
-  "USDT",
-  "USDC",
-  "BNB",
-  "XRP",
-  "SOL",
-  "TRX",
-  "DOGE",
-  "ADA",
-  "AVAX",
-  "DOT",
-  "LINK",
-  "TON",
-  "NEAR",
-  "SUI",
-  "MATIC",
-  "LTC",
-  "BCH",
-  "UNI",
-];
-
-// NOTE: these used to assume `allCurrencies` was always an array, and that
-// every item keyed its ticker as `coin`. When either assumption failed,
-// `.find()` threw a TypeError that only the route's outermost catch saw — so
-// the user got "Sure, let me take you there!" and then nothing at all.
-// readCoin() tolerates the field-name variation; the callers resolve the list
-// itself via resolveCurrencies() so the real shape gets logged.
-function pickPreferredCoins(allCurrencies, preferredList) {
-  if (!Array.isArray(allCurrencies)) return [];
-  return preferredList
-    .map((symbol) => allCurrencies.find((c) => readCoin(c) === symbol))
-    .filter(Boolean); // pagination handles the 10-item limit now
-}
-
-function pickPreferredToCoins(allCurrencies, preferredList, fromCoin) {
-  if (!Array.isArray(allCurrencies)) return [];
-  return preferredList
-    .filter((symbol) => symbol !== fromCoin)
-    .map((symbol) => allCurrencies.find((c) => readCoin(c) === symbol))
-    .filter(Boolean); // pagination handles the 10-item limit now
-}
-
 /**
- * Shared entry for every swap-currency lookup. There are three call sites
- * (main menu, routeToFlow, and the to-coin step) that had drifted into
- * near-duplicates with different guards; this keeps them honest.
+ * Shared entry for every swap-currency lookup (main menu, routeToFlow, and the
+ * to-coin step). The backend decides which coins can be swapped, so there is
+ * no local whitelist. Swap takes no chain, so each coin appears once.
  *
  * @returns {{ coins: any[], error: string|null }}
  */
 async function loadSwapCoins(fromCoin) {
-  const res = await fetchSwapCurrencies();
+  const res = await getSupportedCoins(TRANSACTION_TYPES.SWAP);
 
   if (!res.success) {
-    console.error(
-      "loadSwapCoins: API call failed —",
-      JSON.stringify(res.error)?.slice(0, 300),
-    );
     return {
       coins: [],
       error:
@@ -188,30 +137,15 @@ async function loadSwapCoins(fromCoin) {
     };
   }
 
-  const { list, reason } = resolveCurrencies(res.data, "swap/currencies");
-
-  if (reason) {
-    return {
-      coins: [],
-      error: "⚠️ Swap isn't available right now. Please try again shortly.",
-    };
-  }
-
-  // Normalise before filtering so downstream `c.coin` reads always work.
-  const normalized = normalizeCoins(list);
-
-  const coins = fromCoin
-    ? pickPreferredToCoins(normalized, PREFERRED_COINS, fromCoin)
-    : pickPreferredCoins(normalized, PREFERRED_COINS);
+  const coins = res.coins
+    .filter((c) => !fromCoin || c.coin !== fromCoin)
+    .map((c) => ({
+      ...c,
+      chain:
+        c.chains.length === 1 ? c.chains[0].chain : `${c.chains.length} networks`,
+    }));
 
   if (!coins.length) {
-    console.error(
-      `loadSwapCoins: ${list.length} currencies returned but none matched PREFERRED_COINS.`,
-      "available =",
-      list.map(readCoin).filter(Boolean).slice(0, 30).join(", "),
-      "| preferred =",
-      PREFERRED_COINS.join(", "),
-    );
     return {
       coins: [],
       error: "⚠️ Swap isn't available right now. Please try again shortly.",
@@ -219,6 +153,163 @@ async function loadSwapCoins(fromCoin) {
   }
 
   return { coins, error: null };
+}
+
+/** "\nMin: x" for a send amount prompt, or nothing when there's no minimum. */
+const minLine = (min) => (Number(min) > 0 ? `\nMin: ${min}` : "");
+
+/* ------------- RECEIVE: coin -> network -> address ------------- */
+
+/** Coin list for Receive, from /supported-currencies?transactionType=Receive. */
+async function startReceive(to, phone_number_id) {
+  const res = await getSupportedCoins(TRANSACTION_TYPES.RECEIVE);
+
+  if (!res.success) {
+    await sendWhatsApp(
+      to,
+      "⚠️ Unable to load receive options right now.",
+      phone_number_id,
+    );
+    return;
+  }
+  if (!res.coins.length) {
+    await sendWhatsApp(to, "⚠️ No coins are available to receive.", phone_number_id);
+    return;
+  }
+
+  const session = await getSession(to);
+  await updateSession(to, {
+    data: { ...session.data, receive: { step: "SELECT_COIN", coins: res.coins } },
+  });
+
+  await triggerItemSelectionFlow(to, phone_number_id, {
+    context: "RECEIVE_COIN",
+    items: res.coins.map((c) => ({
+      id: c.coin,
+      title: c.coin,
+      description:
+        c.chains.length === 1 ? c.chains[0].chain : `${c.chains.length} networks`,
+    })),
+    bodyText: "📥 Select the coin you want to receive",
+    heading: "Select coin to receive",
+    label: "Coin",
+    cta: "Select Coin",
+  });
+}
+
+/** One network → show the address; several → ask which network. */
+async function receiveCoinPicked(to, phone_number_id, coin) {
+  const session = await getSession(to);
+  let coins = session.data?.receive?.coins;
+
+  // An old picker tapped after the session moved on — reload the list.
+  if (!coins?.length) {
+    const res = await getSupportedCoins(TRANSACTION_TYPES.RECEIVE);
+    coins = res.coins;
+  }
+
+  const selected = coins?.find((c) => c.coin === coin);
+  if (!selected) {
+    await sendWhatsApp(to, `⚠️ ${coin} can't be received right now.`, phone_number_id);
+    await sendMainMenu(to, phone_number_id);
+    return;
+  }
+
+  if (selected.chains.length === 1) {
+    await showReceiveAddress(to, phone_number_id, coin, selected.chains[0].chain);
+    return;
+  }
+
+  await updateSession(to, {
+    data: {
+      ...session.data,
+      receive: { step: "SELECT_CHAIN", coins, selectedCoin: coin },
+    },
+  });
+
+  const items = selected.chains.map((ch) => ({
+    id: ch.chain,
+    title: ch.chain,
+    description: coin,
+  }));
+
+  // A Flow dropdown takes every network (USDT has 11); a list message caps at 10.
+  const sent = await triggerItemSelectionFlow(to, phone_number_id, {
+    context: "RECEIVE_WALLET",
+    items,
+    bodyText: `📥 Select the ${coin} network`,
+    heading: `Select ${coin} network`,
+    label: "Network",
+    cta: "Select Network",
+  });
+
+  if (!sent) {
+    await sendWhatsApp(
+      to,
+      {
+        type: "interactive",
+        interactive: {
+          type: "list",
+          body: { text: `📥 Select ${coin} network` },
+          action: {
+            button: "Select network",
+            sections: [
+              {
+                title: "Available Networks",
+                rows: items.slice(0, 10).map((i) => ({
+                  id: `RECEIVE_WALLET_${i.id}`,
+                  title: i.title.substring(0, 24),
+                  description: i.description,
+                })),
+              },
+            ],
+          },
+        },
+      },
+      phone_number_id,
+    );
+  }
+}
+
+async function receiveNetworkPicked(to, phone_number_id, network) {
+  const session = await getSession(to);
+  const coin = session.data?.receive?.selectedCoin;
+
+  if (!coin) {
+    await sendWhatsApp(
+      to,
+      "⚠️ That selection has expired. Please start Receive again.",
+      phone_number_id,
+    );
+    await sendMainMenu(to, phone_number_id);
+    return;
+  }
+
+  await showReceiveAddress(to, phone_number_id, coin, network);
+}
+
+/** GET /crypto/receive?coin=&network= and show the address. */
+async function showReceiveAddress(to, phone_number_id, coin, network) {
+  const walletsRes = await fetchReceiveWallets({ coin, network });
+  const wallets = walletsRes.success ? walletsRes.wallets || [] : [];
+  const wallet =
+    wallets.find(
+      (w) => String(w.network).toLowerCase() === String(network).toLowerCase(),
+    ) || wallets[0];
+
+  if (!wallet) {
+    await sendWhatsApp(
+      to,
+      `⚠️ Unable to load your ${coin} address on ${network} right now. Please try again shortly.`,
+      phone_number_id,
+    );
+  } else {
+    await sendWhatsApp(to, buildReceiveAddressText(wallet), phone_number_id);
+  }
+
+  const session = await getSession(to);
+  await updateSession(to, { data: { ...session.data, receive: null } });
+  await sendMainMenu(to, phone_number_id);
 }
 
 /**
@@ -229,15 +320,13 @@ async function loadSwapCoins(fromCoin) {
  * P2P path (phone number step, p2p payload) is still in place below.
  */
 async function startSend(to, phone_number_id, type = "EXTERNAL") {
-  const coinsRes = await fetchSendSupportedCurrencies();
+  const coinsRes = await getSupportedCoins(
+    type === "P2P"
+      ? TRANSACTION_TYPES.SEND_INTERNAL
+      : TRANSACTION_TYPES.SEND_EXTERNAL,
+  );
 
   if (!coinsRes.success) {
-    // The reason was previously swallowed — log it so the next
-    // occurrence is diagnosable from Seq rather than a screenshot.
-    console.error(
-      "SEND: /crypto/supported-currencies failed —",
-      JSON.stringify(coinsRes.error)?.slice(0, 400),
-    );
     await sendWhatsApp(
       to,
       "⚠️ Unable to load supported coins right now. Please try again shortly.",
@@ -246,13 +335,8 @@ async function startSend(to, phone_number_id, type = "EXTERNAL") {
     return;
   }
 
-  const { list: rawCoins, reason: coinsReason } = resolveCurrencies(
-    coinsRes.data,
-    "crypto/supported-currencies",
-  );
-  const coins = normalizeCoins(rawCoins);
-
-  if (coinsReason || !coins.length) {
+  const coins = coinsRes.coins;
+  if (!coins.length) {
     await sendWhatsApp(
       to,
       "⚠️ No coins are available to send right now. Please try again shortly.",
@@ -826,112 +910,20 @@ router.post("/callback", async (req, res) => {
               }
 
               if (actionId.startsWith("RECEIVE_COIN_")) {
-                const coin = actionId.replace("RECEIVE_COIN_", "");
-
-                const walletsRes = await fetchReceiveWallets({ coin });
-
-                if (!walletsRes.success) {
-                  await sendWhatsApp(
-                    from,
-                    "⚠️ Unable to load receive wallets.",
-                    phone_number_id,
-                  );
-                  return;
-                }
-
-                const wallets = walletsRes.wallets || [];
-
-                if (!wallets.length) {
-                  await sendWhatsApp(
-                    from,
-                    `⚠️ No receive wallets available for ${coin}.`,
-                    phone_number_id,
-                  );
-                  return;
-                }
-
-                // ✅ If only ONE wallet → show address directly
-                if (wallets.length === 1) {
-                  const w = wallets[0];
-
-                  await sendWhatsApp(
-                    from,
-                    buildReceiveAddressText(w),
-                    phone_number_id,
-                  );
-
-                  await sendMainMenu(from, phone_number_id);
-                  return;
-                }
-
-                // ✅ Multiple chains → show selection menu
-                const rows = wallets.slice(0, 10).map((w) => ({
-                  id: `RECEIVE_WALLET_${w.id}`,
-                  title: `${w.network}`.substring(0, 24),
-                  description: `${w.coin}`,
-                }));
-
-                await updateSession(from, {
-                  data: {
-                    ...session.data,
-                    receive: {
-                      step: "SELECT_CHAIN",
-                      wallets,
-                      selectedCoin: coin,
-                    },
-                  },
-                });
-
-                await sendWhatsApp(
+                await receiveCoinPicked(
                   from,
-                  {
-                    type: "interactive",
-                    interactive: {
-                      type: "list",
-                      body: { text: `📥 Select ${coin} network` },
-                      action: {
-                        button: "Select network",
-                        sections: [{ title: "Available Networks", rows }],
-                      },
-                    },
-                  },
                   phone_number_id,
+                  actionId.replace("RECEIVE_COIN_", ""),
                 );
-
                 return;
               }
 
               if (actionId.startsWith("RECEIVE_WALLET_")) {
-                const walletId = actionId.replace("RECEIVE_WALLET_", "");
-
-                const wallet = session.data?.receive?.wallets?.find(
-                  (w) => w.id === walletId,
-                );
-
-                if (!wallet) {
-                  await sendWhatsApp(
-                    from,
-                    "⚠️ Wallet not found.",
-                    phone_number_id,
-                  );
-                  return;
-                }
-
-                await sendWhatsApp(
+                await receiveNetworkPicked(
                   from,
-                  buildReceiveAddressText(wallet),
                   phone_number_id,
+                  actionId.replace("RECEIVE_WALLET_", ""),
                 );
-
-                // reset receive state
-                await updateSession(from, {
-                  data: {
-                    ...session.data,
-                    receive: null,
-                  },
-                });
-
-                await sendMainMenu(from, phone_number_id);
                 return;
               }
 
@@ -1074,7 +1066,7 @@ router.post("/callback", async (req, res) => {
 
                   await sendWhatsApp(
                     from,
-                    `💸 Enter amount of *${coin}* to send\nMin: ${chains[0].minWithdrawAmount}`,
+                    `💸 Enter amount of *${coin}* to send${minLine(chains[0].minWithdrawAmount)}`,
                     phone_number_id,
                   );
 
@@ -1085,7 +1077,7 @@ router.post("/callback", async (req, res) => {
                 const rows = chains.slice(0, 10).map((ch) => ({
                   id: `SEND_CHAIN_${ch.chain}`,
                   title: ch.chain,
-                  description: `Min: ${ch.minWithdrawAmount}`,
+                  description: Number(ch.minWithdrawAmount) > 0 ? `Min: ${ch.minWithdrawAmount}` : "No minimum",
                 }));
 
                 await updateSession(from, {
@@ -1148,7 +1140,7 @@ router.post("/callback", async (req, res) => {
 
                 await sendWhatsApp(
                   from,
-                  `💸 Enter amount of *${session.data.send.coin}* to send\nMin: ${chain.minWithdrawAmount}`,
+                  `💸 Enter amount of *${session.data.send.coin}* to send${minLine(chain.minWithdrawAmount)}`,
                   phone_number_id,
                 );
 
@@ -1439,50 +1431,7 @@ router.post("/callback", async (req, res) => {
                 }
 
                 case "RECIEVE_CRYPTO": {
-                  const session = await getSession(from);
-                  const walletsRes = await fetchReceiveWallets();
-
-                  if (!walletsRes.success) {
-                    await sendWhatsApp(
-                      from,
-                      "⚠️ Unable to load receive options right now.",
-                      phone_number_id,
-                    );
-                    break;
-                  }
-
-                  const wallets = walletsRes.wallets || [];
-                  if (!wallets.length) {
-                    await sendWhatsApp(
-                      from,
-                      "⚠️ No receive wallets available.",
-                      phone_number_id,
-                    );
-                    break;
-                  }
-
-                  const uniqueCoins = [...new Set(wallets.map((w) => w.coin))];
-
-                  await updateSession(from, {
-                    data: {
-                      ...session.data,
-                      receive: { step: "SELECT_COIN", wallets },
-                    },
-                  });
-
-                  await triggerItemSelectionFlow(from, phone_number_id, {
-                    context: "RECEIVE_COIN",
-                    items: uniqueCoins.map((coin) => ({
-                      id: coin,
-                      title: coin,
-                      description: `Receive ${coin}`,
-                    })),
-                    bodyText: "📥 Select the coin you want to receive",
-                    heading: "Select coin to receive",
-                    label: "Coin",
-                    cta: "Select Coin",
-                  });
-
+                  await startReceive(from, phone_number_id);
                   break;
                 }
 
@@ -4997,7 +4946,7 @@ async function handleItemSelection({
         });
         await sendWhatsApp(
           phone,
-          `💸 Enter amount of *${coin}* to send\nMin: ${chains[0].minWithdrawAmount}`,
+          `💸 Enter amount of *${coin}* to send${minLine(chains[0].minWithdrawAmount)}`,
           phone_number_id,
         );
         return;
@@ -5016,7 +4965,7 @@ async function handleItemSelection({
         items: chains.map((ch) => ({
           id: ch.chain,
           title: ch.chain,
-          description: `Min: ${ch.minWithdrawAmount}`,
+          description: Number(ch.minWithdrawAmount) > 0 ? `Min: ${ch.minWithdrawAmount}` : "No minimum",
         })),
         bodyText: `📤 Select the ${coin} network`,
         heading: `Select ${coin} network`,
@@ -5046,7 +4995,7 @@ async function handleItemSelection({
 
       await sendWhatsApp(
         phone,
-        `💸 Enter amount of *${session.data.send.coin}* to send\nMin: ${chain.minWithdrawAmount}`,
+        `💸 Enter amount of *${session.data.send.coin}* to send${minLine(chain.minWithdrawAmount)}`,
         phone_number_id,
       );
       return;
@@ -5054,87 +5003,13 @@ async function handleItemSelection({
 
     // ── RECEIVE: coin ────────────────────────────────
     case "RECEIVE_COIN": {
-      const coin = selectedId;
-      const walletsRes = await fetchReceiveWallets({ coin });
-
-      if (!walletsRes.success) {
-        await sendWhatsApp(
-          phone,
-          "⚠️ Unable to load receive wallets.",
-          phone_number_id,
-        );
-        return;
-      }
-
-      const wallets = walletsRes.wallets || [];
-
-      if (!wallets.length) {
-        await sendWhatsApp(
-          phone,
-          `⚠️ No receive wallets available for ${coin}.`,
-          phone_number_id,
-        );
-        return;
-      }
-
-      // Single wallet → show address directly
-      if (wallets.length === 1) {
-        const w = wallets[0];
-        await sendWhatsApp(
-          phone,
-          buildReceiveAddressText(w),
-          phone_number_id,
-        );
-        await updateSession(phone, {
-          data: { ...session.data, receive: null },
-        });
-        await sendMainMenu(phone, phone_number_id);
-        return;
-      }
-
-      await updateSession(phone, {
-        data: {
-          ...session.data,
-          receive: { step: "SELECT_CHAIN", wallets, selectedCoin: coin },
-        },
-      });
-
-      await triggerItemSelectionFlow(phone, phone_number_id, {
-        context: "RECEIVE_WALLET",
-        items: wallets.map((w) => ({
-          id: w.id,
-          title: w.network,
-          description: w.coin,
-        })),
-        bodyText: `📥 Select the ${coin} network`,
-        heading: `Select ${coin} network`,
-        label: "Network",
-        cta: "Select Network",
-      });
+      await receiveCoinPicked(phone, phone_number_id, selectedId);
       return;
     }
 
-    // ── RECEIVE: wallet / chain ──────────────────────
+    // ── RECEIVE: network ─────────────────────────────
     case "RECEIVE_WALLET": {
-      const wallet = session.data?.receive?.wallets?.find(
-        (w) => String(w.id) === String(selectedId),
-      );
-
-      if (!wallet) {
-        await sendWhatsApp(phone, "⚠️ Wallet not found.", phone_number_id);
-        return;
-      }
-
-      await sendWhatsApp(
-        phone,
-        buildReceiveAddressText(wallet),
-        phone_number_id,
-      );
-
-      await updateSession(phone, {
-        data: { ...session.data, receive: null },
-      });
-      await sendMainMenu(phone, phone_number_id);
+      await receiveNetworkPicked(phone, phone_number_id, selectedId);
       return;
     }
 
@@ -5747,42 +5622,7 @@ async function routeToFlow(flow, from, phone_number_id, sessionData) {
       break;
     }
     case "RECEIVE": {
-      const walletsRes = await fetchReceiveWallets();
-      if (!walletsRes.success) {
-        await sendWhatsApp(
-          from,
-          "⚠️ Unable to load receive options right now.",
-          phone_number_id,
-        );
-        return;
-      }
-      const wallets = walletsRes.wallets || [];
-      if (!wallets.length) {
-        await sendWhatsApp(
-          from,
-          "⚠️ No receive wallets available.",
-          phone_number_id,
-        );
-        return;
-      }
-      const uniqueCoins = [...new Set(wallets.map((w) => w.coin))];
-
-      await updateSession(from, {
-        data: { ...sessionData, receive: { step: "SELECT_COIN", wallets } },
-      });
-
-      await triggerItemSelectionFlow(from, phone_number_id, {
-        context: "RECEIVE_COIN",
-        items: uniqueCoins.map((coin) => ({
-          id: coin,
-          title: coin,
-          description: `Receive ${coin}`,
-        })),
-        bodyText: "📥 Select the coin you want to receive",
-        heading: "Select coin to receive",
-        label: "Coin",
-        cta: "Select Coin",
-      });
+      await startReceive(from, phone_number_id);
       break;
     }
     case "SWAP": {

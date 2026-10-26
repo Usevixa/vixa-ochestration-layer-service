@@ -11,29 +11,6 @@ const VIXA_API_BASE =
   process.env.VIXA_API_BASE || "https://api.usevixa.com/api/v1";
 
 /**
- * Fetch supported send currencies
- * GET /crypto/supported-currencies
- */
-export async function fetchSendSupportedCurrencies({ coin, chain } = {}) {
-  try {
-    const token = await getToken();
-    if (!token) throw new Error("Missing auth token");
-
-    const res = await axios.get(`${VIXA_API_BASE}/crypto/supported-currencies`, {
-      httpsAgent,
-      params: { coin, chain },
-      headers: { Authorization: `Bearer ${token}` },
-    });
-
-    return { success: true, data: res.data };
-  } catch (err) {
-    console.error("fetchSendSupportedCurrencies ERROR:", err?.response?.data || err?.message);
-    return { success: false, error: err?.response?.data || err?.message };
-  }
-}
-
-
-/**
  * Quote an external (onchain) send
  * POST /crypto/send/quote
  * Body: { type: "onchain", coin, chain, amount, externalAddress }

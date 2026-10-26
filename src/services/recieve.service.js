@@ -13,20 +13,23 @@ const VIXA_API_BASE =
 
 /**
  * Fetch crypto receive addresses
- * GET /crypto/receive?coin=USDT  (coin optional — omit to list every coin)
+ * GET /crypto/receive?coin=USDT&network=SOLANA  (both optional)
  * Response: { data: [{ coin, network, address, memo, txUrlPrefix }] }
  *
  * `wallets` is the list with an `id` added (coin + network), because the
  * response has none and the network picker needs one to find the pick.
  */
-export async function fetchReceiveWallets({ coin } = {}) {
+export async function fetchReceiveWallets({ coin, network } = {}) {
   try {
     const token = await getToken();
     if (!token) throw new Error("Missing auth token");
 
     const res = await axios.get(`${VIXA_API_BASE}/crypto/receive`, {
       httpsAgent,
-      params: coin ? { coin } : {},
+      params: {
+        ...(coin ? { coin } : {}),
+        ...(network ? { network } : {}),
+      },
       headers: { Authorization: `Bearer ${token}` },
     });
 

@@ -12,30 +12,6 @@ const VIXA_API_BASE =
   process.env.VIXA_API_BASE || "https://api.usevixa.com/api/v1";
 
 /**
- * Fetch available currencies for swapping
- * GET /api/v1/swap/currencies?chain=solana
- */
-export async function fetchSwapCurrencies() {
-  try {
-    const token = await getToken(); // Ensure we await if getToken is async, though your example implies sync.
-    if (!token) throw new Error("Missing auth token");
-
-    const res = await axios.get(`${VIXA_API_BASE}/swap/currencies`, {
-      httpsAgent,
-      params: { chain: "solana" },
-      headers: { Authorization: `Bearer ${token}` },
-    });
-
-    console.log("fetchSwapCurrencies RESPONSE:", res.data);
-
-    return { success: true, data: res.data };
-  } catch (err) {
-    console.error("fetchSwapCurrencies ERROR:", err?.response?.data || err?.message);
-    return { success: false, error: err?.response?.data || err?.message };
-  }
-}
-
-/**
  * Get a quote for the swap
  * GET /api/v1/swap/quote?fromCoin=...&toCoin=...&fromAmount=...
  */
