@@ -1,4 +1,4 @@
-// services/verify.service.js
+// services/confirmPayment.service.js
 import axios from "axios";
 import { getToken } from "./auth.service.js";
 import https from "https";
@@ -11,35 +11,37 @@ const httpsAgent = new https.Agent({
 const VIXA_API_BASE =
   process.env.VIXA_API_BASE || "https://api.usevixa.com/api/v1";
 
-export async function confirmPayment({ 
-    id
-
-}) {
+/**
+ * confirmPayment({ id }) — `id` is the deposit's intentId.
+ * Response: { success, message, data: { status, usdtEstimate, reference, expiresAt } }
+ */
+export async function confirmPayment({ id }) {
     try {
-
         const token = getToken();
         if (!token) {
-            throw new Error("Missing auth token for fetching rates");
+            throw new Error("Missing auth token for confirming deposit");
         }
 
+        // POST with no body — the options object must be the THIRD argument,
+        // otherwise axios sends it as the body and no auth header goes out.
         const res = await axios.post(
-            `${VIXA_API_BASE}/payment/crypto/deposits${id}/confirm`,
+            `${VIXA_API_BASE}/payment/crypto/deposits/${encodeURIComponent(id)}/confirm`,
+            null,
             {
                 httpsAgent,
                 timeout: 750000, // request timeout
                 headers: {
                     Authorization: `Bearer ${token}`,
-                    "Content-Type": "application/json",
                     Accept: "text/plain",
                 },
             }
         );
 
-        console.log("confirm pay RESPONSE:", res);
+        console.log("confirmPayment RESPONSE:", res.data);
 
         return { success: true, data: res.data };
     } catch (err) {
-        console.error("verifyNIN ERROR:", err?.response?.data || err?.message);
+        console.error("confirmPayment ERROR:", err?.response?.data || err?.message);
         return { success: false, error: err?.response?.data || err?.message };
     }
 }

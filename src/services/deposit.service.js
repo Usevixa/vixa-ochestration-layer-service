@@ -34,13 +34,12 @@ export async function depositCrypto({
 
     const token = getToken();
     if (!token) {
-      throw new Error("Missing auth token for NIN verification");
+      throw new Error("Missing auth token for deposit");
     }
 
-    console.log("Verifying NIN with:", {
-      ...payload,
-      token,
-    });
+    // Never log the token or PIN.
+    const { pin: _pin, ...loggable } = payload;
+    console.log("depositCrypto payload:", loggable);
 
     const res = await axios.post(
       `${VIXA_API_BASE}/payment/crypto/deposit/initiate`,
@@ -56,11 +55,11 @@ export async function depositCrypto({
       }
     );
 
-    console.log("depositCrypto RESPONSE:", res);
+    console.log("depositCrypto RESPONSE:", res.data);
 
     return { success: true, data: res.data };
   } catch (err) {
-    console.error("verifyNIN ERROR:", err?.response?.data || err?.message);
+    console.error("depositCrypto ERROR:", err?.response?.data || err?.message);
     return { success: false, error: err?.response?.data || err?.message };
   }
 }
