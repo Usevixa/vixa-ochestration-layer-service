@@ -11,27 +11,38 @@ const VIXA_API_BASE =
   process.env.VIXA_API_BASE || "https://api.usevixa.com/api/v1";
 
 /**
- * Fetch supported send currencies
- * GET /crypto/supported-currencies
+ * Quote an external (onchain) send
+ * POST /crypto/send/quote
+ * Body: { type: "onchain", coin, chain, amount, externalAddress }
+ * Response `data`: { quoteId, coin, network, amount, networkFee, vixaFee,
+ *   total, totalDebit, expiresAt }
  */
-export async function fetchSendSupportedCurrencies({ coin, chain } = {}) {
+export async function fetchSendQuote({ coin, chain, amount, externalAddress }) {
   try {
     const token = await getToken();
     if (!token) throw new Error("Missing auth token");
 
-    const res = await axios.get(`${VIXA_API_BASE}/crypto/supported-currencies`, {
+    const payload = {
+      type: "onchain",
+      coin: String(coin).toLowerCase(),
+      chain,
+      amount,
+      externalAddress,
+    };
+    console.log("fetchSendQuote payload:", payload);
+
+    const res = await axios.post(`${VIXA_API_BASE}/crypto/send/quote`, payload, {
       httpsAgent,
-      params: { coin, chain },
       headers: { Authorization: `Bearer ${token}` },
     });
 
+    console.log("fetchSendQuote RESPONSE:", res.data);
     return { success: true, data: res.data };
   } catch (err) {
-    console.error("fetchSendSupportedCurrencies ERROR:", err?.response?.data || err?.message);
+    console.error("fetchSendQuote ERROR:", err?.response?.data || err?.message);
     return { success: false, error: err?.response?.data || err?.message };
   }
 }
-
 
 /**
  * Execute Send Crypto (Dynamic Payload)
@@ -44,6 +55,8 @@ export async function executeSendCrypto({
   phoneNumber,     // Sender's Phone (from session)
   externalAddress, // User Input (Recipient Phone for P2P, Wallet Address for Onchain)
   pin,
+  quoteId,         // Onchain only, from fetchSendQuote
+  idempotencyKey,  // Onchain only, made once per quote
 }) {
   try {
     const token = await getToken();
@@ -64,27 +77,21 @@ export async function executeSendCrypto({
         pin: pin
       };
     } 
-    // 2. Construct Payload for ONCHAIN
+    // 2. ONCHAIN — everything else was fixed by the quote
     else {
-      payload = {
-        type: "onchain",
-        coin: coin,
-        chain: chain,
-        amount: amount,
-        phoneNumber: phoneNumber, // Send SENDER phone here (usually for reference)
-        externalAddress: externalAddress, 
-        pin: pin
-      };
+      payload = { quoteId, pin, idempotencyKey };
     }
 
-    console.log("🚀 EXECUTING SEND WITH PAYLOAD:", JSON.stringify(payload, null, 2));
+    // Never log the PIN.
+    const { pin: _pin, ...loggable } = payload;
+    console.log("🚀 EXECUTING SEND WITH PAYLOAD:", JSON.stringify(loggable, null, 2));
 
     const res = await axios.post(`${VIXA_API_BASE}/crypto/send`, payload, {
       httpsAgent,
       headers: { Authorization: `Bearer ${token}` },
     });
 
-    console.log('sending senders data', res)
+    console.log("executeSendCrypto RESPONSE:", res.data);
 
     return { success: true, data: res.data };
   } catch (err) {

@@ -115,7 +115,6 @@ export function describeFlowState(sessionData) {
   // ── Swap ───────────────────────────────────────────────────────
   if (d.swap?.step) {
     const from = d.swap.fromCoin;
-    const limits = d.swap.fromCoinLimits;
     const map = {
       SELECT_FROM: {
         expecting: "selection",
@@ -132,12 +131,15 @@ export function describeFlowState(sessionData) {
       },
       ENTER_AMOUNT: {
         expecting: "amount",
-        describe: `In the SWAP flow. Waiting for how much ${from || "of the selected coin"} the user wants to swap${
-          limits ? ` (min ${limits.minAmount}, max ${limits.maxAmount})` : ""
-        }.`,
-        rePrompt: `💰 Enter the amount of *${from || "the coin"}* you want to swap${
-          limits ? `\n\nMin: ${limits.minAmount}\nMax: ${limits.maxAmount}` : ""
-        }`,
+        describe: `In the SWAP flow. Waiting for how much ${from || "of the selected coin"} the user wants to swap.`,
+        rePrompt: `💰 Enter the amount of *${from || "the coin"}* you want to swap:`,
+      },
+      AWAITING_SWAP_CONFIRM: {
+        expecting: "confirmation",
+        committed: true,
+        describe:
+          "In the SWAP flow. A quote has been shown and we are waiting for the user to accept or cancel it.",
+        rePrompt: "Please tap *Yes, Swap* or *Cancel* above to continue.",
       },
       AWAITING_SWAP_PIN: {
         expecting: "pin",
@@ -163,7 +165,7 @@ export function describeFlowState(sessionData) {
       SELECT_SEND_TYPE: {
         expecting: "selection",
         describe:
-          "In the SEND flow. Waiting for the user to choose whether they are sending to another VIXA user or to an external wallet.",
+          "In the SEND flow. Waiting for the user to choose a recipient type (only external wallets are available).",
         rePrompt: "Please tap above and choose who you're sending to.",
       },
       SELECT_COIN: {
@@ -189,11 +191,12 @@ export function describeFlowState(sessionData) {
           "In the SEND flow. Waiting for the destination blockchain wallet address.",
         rePrompt: "📩 Please paste the wallet address you're sending to:",
       },
-      ENTER_TAG: {
-        expecting: "tag",
+      AWAITING_SEND_CONFIRM: {
+        expecting: "confirmation",
+        committed: true,
         describe:
-          "In the SEND flow. Waiting for the recipient's VIXA tag or phone number.",
-        rePrompt: "👤 Please enter the recipient's VIXA tag or phone number:",
+          "In the SEND flow. A send quote has been shown and we are waiting for the user to accept or cancel it.",
+        rePrompt: "Please tap *Yes, Send* or *Cancel* above to continue.",
       },
       ENTER_PIN: {
         expecting: "pin",

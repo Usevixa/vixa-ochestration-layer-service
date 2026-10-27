@@ -12,29 +12,6 @@ const VIXA_API_BASE =
   process.env.VIXA_API_BASE || "https://api.usevixa.com/api/v1";
 
 /**
- * Fetch available currencies for swapping
- * GET /api/v1/swap/currencies
- */
-export async function fetchSwapCurrencies() {
-  try {
-    const token = await getToken(); // Ensure we await if getToken is async, though your example implies sync.
-    if (!token) throw new Error("Missing auth token");
-
-    const res = await axios.get(`${VIXA_API_BASE}/swap/currencies`, {
-      httpsAgent,
-      headers: { Authorization: `Bearer ${token}` },
-    });
-
-    console.log('fetching swap currencies', res)
-
-    return { success: true, data: res.data };
-  } catch (err) {
-    console.error("fetchSwapCurrencies ERROR:", err?.response?.data || err?.message);
-    return { success: false, error: err?.response?.data || err?.message };
-  }
-}
-
-/**
  * Get a quote for the swap
  * GET /api/v1/swap/quote?fromCoin=...&toCoin=...&fromAmount=...
  */
@@ -59,15 +36,18 @@ export async function fetchSwapQuote({ fromCoin, toCoin, fromAmount }) {
 /**
  * Execute swap
  * POST /api/v1/swap
+ * Body: { fromCoin, fromAmount, toCoin, pin, quoteId }
+ * Response `data`: { fromCoin, toCoin, fromAmount, toAmount, fee, status,
+ *   idempotencyKey, subWalletId, oxReference, oxSwapId, notes, createdAt, swapId }
  */
-export async function executeSwap({ fromCoin, fromAmount, toCoin, pin }) {
+export async function executeSwap({ fromCoin, fromAmount, toCoin, pin, quoteId }) {
   try {
     const token = await getToken();
     if (!token) throw new Error("Missing auth token");
 
     const res = await axios.post(
       `${VIXA_API_BASE}/swap`,
-      { fromCoin, fromAmount, toCoin, pin },
+      { fromCoin, fromAmount, toCoin, pin, quoteId },
       {
         httpsAgent,
         headers: { Authorization: `Bearer ${token}` },

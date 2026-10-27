@@ -1,12 +1,45 @@
 // services/auth.service.js
 import axios from "axios";
+import { AsyncLocalStorage } from "node:async_hooks";
 import { getSession, updateSession } from "./session.service.js";
 
 const VIXA_API_BASE =
   process.env.VIXA_API_BASE || "https://api.usevixa.com/api/v1";
 
-let cachedToken = null;
-let tokenExpiresAt = null;
+/**
+ * The access token for the user whose message is being handled.
+ *
+ * This used to be two module-level variables shared by every user. Handlers
+ * await between restoring the token and using it, so user B's message could
+ * overwrite the token mid-way through user A's withdrawal, and A's next API
+ * call went out as B. AsyncLocalStorage gives each inbound message its own
+ * store that follows it through every await, so that can no longer happen.
+ */
+const tokenContext = new AsyncLocalStorage();
+
+/**
+ * Run `fn` with its own token store. Every inbound message must be handled
+ * inside one of these — getToken() refuses to work outside it.
+ */
+export function runWithUserContext(phone, fn) {
+  return tokenContext.run({ phone, token: null, tokenExpiresAt: null }, fn);
+}
+
+function currentContext() {
+  const store = tokenContext.getStore();
+  if (!store) {
+    // Fail closed. An API call with no user context is a bug, never a reason
+    // to fall back to some other user's token.
+    throw new Error("getToken() called outside a user context");
+  }
+  return store;
+}
+
+function setContextToken(token, expiresAt) {
+  const store = currentContext();
+  store.token = token;
+  store.tokenExpiresAt = expiresAt;
+}
 
 /**
  * loginUser({ phoneNumber, pin, deviceId })
@@ -25,7 +58,7 @@ export async function loginUser({ phoneNumber, pin, deviceId = "" }) {
 
     const token = res.data?.data?.accessToken || res.data?.accessToken;
     const expiresAtRaw = res.data?.data?.accessTokenExpiresAt;
-    tokenExpiresAt = expiresAtRaw
+    const tokenExpiresAt = expiresAtRaw
       ? new Date(expiresAtRaw).getTime()
       : Date.now() + 3600 * 1000;
 
@@ -38,7 +71,7 @@ export async function loginUser({ phoneNumber, pin, deviceId = "" }) {
     const isFullyOnboarded = res.data?.data?.isFullyOnboarded ?? null;
     const onboardingStage = res.data?.data?.onboardingStage ?? null;
 
-    cachedToken = token;
+    setContextToken(token, tokenExpiresAt);
 
     await updateSession(phoneNumber, {
       data: {
@@ -70,19 +103,20 @@ export function isSessionTokenValid(sessionData) {
 
 export function restoreCachedToken(sessionData) {
   if (sessionData?.token) {
-    cachedToken = sessionData.token;
-    tokenExpiresAt = sessionData.tokenExpiresAt || Date.now() + 3600 * 1000;
+    const expiresAt = sessionData.tokenExpiresAt || Date.now() + 3600 * 1000;
+    setContextToken(sessionData.token, expiresAt);
     console.log(
-      "Restored cachedToken from session, expires:",
-      new Date(tokenExpiresAt).toISOString(),
+      "Restored token from session, expires:",
+      new Date(expiresAt).toISOString(),
     );
   }
 }
 
 export async function verifyUserToken() {
-  if (!cachedToken) throw new Error("No cached token");
+  const token = getToken();
+  if (!token) throw new Error("No cached token");
   const res = await axios.get(`${VIXA_API_BASE}/auth/verify`, {
-    headers: { Authorization: `Bearer ${cachedToken}` },
+    headers: { Authorization: `Bearer ${token}` },
   });
   return res.data;
 }
@@ -106,8 +140,7 @@ export async function refreshAccessToken({ phoneNumber, refreshToken }) {
       ? new Date(data.refreshTokenExpiresAt).getTime()
       : null;
 
-    cachedToken = data.accessToken;
-    tokenExpiresAt = newTokenExpiresAt;
+    setContextToken(data.accessToken, newTokenExpiresAt);
 
     await updateSession(phoneNumber, {
       data: {
@@ -130,12 +163,13 @@ export async function refreshAccessToken({ phoneNumber, refreshToken }) {
 }
 
 export function getToken() {
+  const store = currentContext();
   // Optionally refresh here if expired (requires storing credentials or refresh token)
-  if (cachedToken && tokenExpiresAt && Date.now() > tokenExpiresAt) {
+  if (store.token && store.tokenExpiresAt && Date.now() > store.tokenExpiresAt) {
     console.warn("Cached token expired");
-    cachedToken = null;
+    store.token = null;
   }
-  return cachedToken;
+  return store.token;
 }
 
 // services/auth.service.js
