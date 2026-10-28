@@ -1,4 +1,4 @@
-// services/verify.service.js
+// services/deposit.service.js
 import axios from "axios";
 import { getToken } from "./auth.service.js";
 import https from "https";
