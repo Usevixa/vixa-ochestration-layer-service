@@ -3732,7 +3732,7 @@ async function processFlowCompletion(phone, phone_number_id, form) {
       await loginUser({ phoneNumber: phone, pin: onboardingPin });
     } catch (e) {
       console.error("Auto-login after onboarding failed:", e?.message);
-      // Next message → PIN login → the Basicinfocompleted stage check
+      // Next message → PIN login → the BasicInfoCompleted stage check
       // opens the KYC form, so nothing is lost.
       await sendWhatsApp(
         phone,
@@ -3825,7 +3825,7 @@ async function sendKycReminderIfIncomplete(phone, phone_number_id) {
 
   const name = firstName ? ` ${firstName}` : "";
 
-  if (onboardingStage === "Basicinfocompleted") {
+  if (onboardingStage === "BasicInfoCompleted") {
     await sendWhatsApp(
       phone,
       `👋 Welcome back${name}!\n\nYour identity verification (KYC) isn't done yet. Complete it to unlock deposits, withdrawals, transfers and swaps 👇`,
@@ -3850,7 +3850,7 @@ async function sendKycReminderIfIncomplete(phone, phone_number_id) {
  * Flow submissions skip the webhook's token check, and a reminder CTA can be
  * tapped hours later. Refresh silently if possible; otherwise ask for the
  * PIN. After login, the onboardingStage check re-opens the right form
- * (Basicinfocompleted → KYC, NinVerified → BVN).
+ * (BasicInfoCompleted → KYC, NinVerified → BVN).
  */
 async function ensureLiveToken(phone, phone_number_id, expiredMessage) {
   let session = await getSession(phone);
@@ -4240,7 +4240,7 @@ async function handlePinFlowSubmission({
 
         if (!isFullyOnboarded) {
           // Onboarded, KYC not started → combined KYC form
-          if (onboardingStage === "Basicinfocompleted") {
+          if (onboardingStage === "BasicInfoCompleted") {
             await sendWhatsApp(
               phone,
               `👋 Welcome back ${me.firstName}!\n\nYour identity verification (KYC) isn't done yet. Complete it to unlock deposits, withdrawals, transfers and swaps 👇`,
