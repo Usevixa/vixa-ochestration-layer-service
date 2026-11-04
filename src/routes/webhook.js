@@ -494,8 +494,15 @@ router.post("/callback", async (req, res) => {
 
             // Store phone_number_id in session for later replies
             let session = await getSession(from);
+            // Read before overwriting — the KYC reminder below needs to know
+            // how long the user was away.
+            const previousSeenAt = session.data?.lastSeenAt || null;
             await updateSession(from, {
-              data: { ...(session.data || {}), phone_number_id },
+              data: {
+                ...(session.data || {}),
+                phone_number_id,
+                lastSeenAt: Date.now(),
+              },
             });
 
             restoreCachedToken(session.data);
@@ -702,6 +709,20 @@ router.post("/callback", async (req, res) => {
                   return;
                 }
               }
+            }
+
+            // A returning user whose session is still alive (or was silently
+            // refreshed) never passes through PIN login, so the onboarding
+            // stage check there never runs for them. Remind them here — but
+            // don't block: their message is still handled below.
+            if (
+              !isFlowReply &&
+              session.data?.authenticated &&
+              !session.data?.awaitingPin &&
+              previousSeenAt &&
+              Date.now() - previousSeenAt > KYC_REMINDER_AWAY_MS
+            ) {
+              await sendKycReminderIfIncomplete(from, phone_number_id);
             }
 
             // --- FIX: Detect and process Flow Submission (nfm_reply) ---
@@ -3528,6 +3549,8 @@ async function processFlowCompletion(phone, phone_number_id, form) {
       console.error("BVN verification error:", err?.message);
     }
 
+    if (bvnOk) await setOnboardingStage(phone, "BvnVerified");
+
     // Pass or fail, the user continues. On fail, the backend reminds again.
     await sendWhatsApp(
       phone,
@@ -3758,6 +3781,71 @@ async function processFlowCompletion(phone, phone_number_id, form) {
   }
 }
 
+// How long a signed-in user must be gone before their next message counts as
+// "coming back" and gets a KYC reminder.
+const KYC_REMINDER_AWAY_MS = 30 * 60 * 1000;
+
+/** Keep the stage from login current as the user progresses in this session. */
+async function setOnboardingStage(phone, onboardingStage, isFullyOnboarded) {
+  const s = await getSession(phone);
+  await updateSession(phone, {
+    data: {
+      ...s.data,
+      onboardingStage,
+      ...(isFullyOnboarded !== undefined ? { isFullyOnboarded } : {}),
+    },
+  });
+}
+
+/**
+ * Same stage routing as PIN login, for users who skipped login because their
+ * session was still alive. Only stages the user can act on get a reminder.
+ * Returns true if a form was sent.
+ */
+async function sendKycReminderIfIncomplete(phone, phone_number_id) {
+  const session = await getSession(phone);
+  let { onboardingStage, isFullyOnboarded, firstName } = session.data || {};
+
+  // The stage was captured at login and goes stale if the backend approved
+  // something since. Prefer a live value when /auth/me carries one.
+  try {
+    const me = await fetchAuthMe();
+    const live = me?.onboardingStage ?? me?.data?.onboardingStage;
+    const liveFull = me?.isFullyOnboarded ?? me?.data?.isFullyOnboarded;
+    if (live) onboardingStage = live;
+    if (liveFull !== undefined && liveFull !== null) isFullyOnboarded = liveFull;
+    firstName = me?.firstName || me?.data?.firstName || firstName;
+    if (live) await setOnboardingStage(phone, onboardingStage, isFullyOnboarded);
+  } catch (err) {
+    console.error("KYC reminder: fetchAuthMe failed:", err?.message);
+  }
+
+  console.log("KYC reminder check for", phone, "stage:", onboardingStage);
+  if (isFullyOnboarded) return false;
+
+  const name = firstName ? ` ${firstName}` : "";
+
+  if (onboardingStage === "BasicInfoCompleted") {
+    await sendWhatsApp(
+      phone,
+      `👋 Welcome back${name}!\n\nYour identity verification (KYC) isn't done yet. Complete it to unlock deposits, withdrawals, transfers and swaps 👇`,
+      phone_number_id,
+    );
+    return triggerKYCFlow(phone, phone_number_id);
+  }
+
+  if (onboardingStage === "NinVerified") {
+    await sendWhatsApp(
+      phone,
+      `👋 Welcome back${name}!\n\nYour NIN is verified. Please confirm your BVN to finish your verification 👇`,
+      phone_number_id,
+    );
+    return triggerBVNFlow(phone, phone_number_id);
+  }
+
+  return false;
+}
+
 /**
  * Flow submissions skip the webhook's token check, and a reminder CTA can be
  * tapped hours later. Refresh silently if possible; otherwise ask for the
@@ -3937,6 +4025,7 @@ async function handleKycSubmission(phone, phone_number_id, form) {
   // re-send the form (resubmitting mid-review would collide). The backend
   // sends the BVN reminder once the NIN clears.
   if (ninStatus === "1" || ninStatus === "6") {
+    await setOnboardingStage(phone, "NinSubmitted");
     await sendWhatsApp(
       phone,
       "⏳ Your NIN is under review. Once it's approved, we'll send you a message here to confirm your BVN and finish your verification.",
@@ -3974,6 +4063,7 @@ async function handleKycSubmission(phone, phone_number_id, form) {
   if (!bvnOk) {
     // NIN passed, BVN didn't. Don't block the user — the backend follows up
     // with a reminder whose CTA (payload VERIFY_BVN) opens the BVN-only flow.
+    await setOnboardingStage(phone, "NinVerified");
     await sendWhatsApp(
       phone,
       "✅ Your NIN has been verified.\n\n⏳ We're still confirming your BVN. If we need anything else from you, we'll message you here with a button to complete it.\n\nYou can carry on using VIXA in the meantime 👇",
@@ -3987,7 +4077,11 @@ async function handleKycSubmission(phone, phone_number_id, form) {
   const fresh = await getSession(phone);
   await updateSession(phone, {
     step: "COMPLETED",
-    data: { ...fresh.data, firstName: me.firstName },
+    data: {
+      ...fresh.data,
+      firstName: me.firstName,
+      onboardingStage: "BvnVerified",
+    },
   });
 
   await sendWhatsApp(
