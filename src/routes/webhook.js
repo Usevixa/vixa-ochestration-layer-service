@@ -14,7 +14,11 @@ import {
   isSessionTokenValid,
   runWithUserContext,
 } from "../services/auth.service.js";
-import { fetchAuthMe } from "../services/user.service.js";
+import {
+  fetchAuthMe,
+  displayName,
+  withName,
+} from "../services/user.service.js";
 import {
   depositCrypto,
   getDepositAssets,
@@ -1593,7 +1597,7 @@ router.post("/callback", async (req, res) => {
                       year: "numeric",
                     });
 
-                    let balanceText = `Hi ${me.firstName} 👋\n\n💼 *Your Wallet Balances*\n\n`;
+                    let balanceText = `Hi${withName(me)} 👋\n\n💼 *Your Wallet Balances*\n\n`;
 
                     if (!balances || balances.length === 0) {
                       balanceText += "You currently have no wallet balances.\n";
@@ -4084,7 +4088,7 @@ async function handleKycSubmission(phone, phone_number_id, form) {
 
   await sendWhatsApp(
     phone,
-    `✅ *You're verified, ${me.firstName}!*\n\n` +
+    `✅ *You're verified${withName(me) ? "," + withName(me) : ""}!*\n\n` +
       `I'm VIXA, your AI-powered wallet assistant. I'll help you send, receive, convert and manage money — NGN and crypto (USDT, BTC, ETH) — right here on WhatsApp.\n\n` +
       `For your security, please make sure your WhatsApp is locked 🔒\n\n` +
       `Let's get started 🚀`,
@@ -4244,7 +4248,7 @@ async function handlePinFlowSubmission({
           if (onboardingStage === "BasicInfoCompleted") {
             await sendWhatsApp(
               phone,
-              `👋 Welcome back ${me.firstName}!\n\nYour identity verification (KYC) isn't done yet. Complete it to unlock deposits, withdrawals, transfers and swaps 👇`,
+              `👋 Welcome back${withName(me)}!\n\nYour identity verification (KYC) isn't done yet. Complete it to unlock deposits, withdrawals, transfers and swaps 👇`,
               phone_number_id,
             );
             await triggerKYCFlow(phone, phone_number_id);
@@ -4255,7 +4259,7 @@ async function handlePinFlowSubmission({
           if (onboardingStage === "NinSubmitted") {
             await sendWhatsApp(
               phone,
-              `👋 Welcome back ${me.firstName}!\n\n⏳ Your NIN is still under review. Once it's approved, we'll send you a message here to confirm your BVN.`,
+              `👋 Welcome back${withName(me)}!\n\n⏳ Your NIN is still under review. Once it's approved, we'll send you a message here to confirm your BVN.`,
               phone_number_id,
             );
             await sendMainMenu(phone, phone_number_id);
@@ -4266,7 +4270,7 @@ async function handlePinFlowSubmission({
           if (onboardingStage === "NinVerified") {
             await sendWhatsApp(
               phone,
-              `👋 Welcome back ${me.firstName}!\n\nYour NIN is verified. Please confirm your BVN to finish your verification 👇`,
+              `👋 Welcome back${withName(me)}!\n\nYour NIN is verified. Please confirm your BVN to finish your verification 👇`,
               phone_number_id,
             );
             await triggerBVNFlow(phone, phone_number_id);
@@ -4276,7 +4280,7 @@ async function handlePinFlowSubmission({
           if (onboardingStage === "BvnVerified") {
             await sendWhatsApp(
               phone,
-              `👋 Welcome back ${me.firstName}!\n\nYour BVN has been verified. Your wallet is currently being set up — this usually takes just a moment.\n\nYou can go ahead and explore VIXA in the meantime 👇`,
+              `👋 Welcome back${withName(me)}!\n\nYour BVN has been verified. Your wallet is currently being set up — this usually takes just a moment.\n\nYou can go ahead and explore VIXA in the meantime 👇`,
               phone_number_id,
             );
             await sendMainMenu(phone, phone_number_id);
@@ -4286,7 +4290,7 @@ async function handlePinFlowSubmission({
 
         await sendWhatsApp(
           phone,
-          `Welcome back ${me.firstName} 👋`,
+          `Welcome back${withName(me)} 👋`,
           phone_number_id,
         );
 
@@ -5749,7 +5753,7 @@ async function routeToFlow(flow, from, phone_number_id, sessionData) {
         day: "numeric",
         year: "numeric",
       });
-      let balanceText = `Hi ${me.firstName} 👋\n\n💼 *Your Wallet Balances*\n\n`;
+      let balanceText = `Hi${withName(me)} 👋\n\n💼 *Your Wallet Balances*\n\n`;
       balanceText += balances?.length
         ? balances.map((b) => `• ${b.coin}: ${b.balance}`).join("\n")
         : "You currently have no wallet balances.";
