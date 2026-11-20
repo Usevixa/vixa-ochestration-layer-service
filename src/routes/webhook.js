@@ -3814,7 +3814,7 @@ async function sendKycReminderIfIncomplete(phone, phone_number_id) {
   console.log("KYC reminder check for", phone, "stage:", onboardingStage);
   if (isFullyOnboarded) return false;
 
-  const name = firstName ? ` ${firstName}` : "";
+  const name = withName({ firstName }); // never " undefined"
 
   if (onboardingStage === "BasicInfoCompleted") {
     await sendWhatsApp(
