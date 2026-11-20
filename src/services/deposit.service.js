@@ -2,6 +2,8 @@
 import axios from "axios";
 import { getToken } from "./auth.service.js";
 import https from "https";
+import logger from "../lib/logger.js";
+import { normalizeDepositAssets } from "../utils/depositAssets.js";
 
 const VIXA_API_BASE = process.env.VIXA_API_BASE || "https://api.usevixa.com/api/v1";
 
@@ -66,9 +68,9 @@ export async function depositCrypto({
 
 /**
  * GET /payment/crypto/deposits/assets[?coin=]
- * Response: { success, message, data: { success, data: [{ coin, iconUrl,
- *   chains: [{ chain, needTag, depositConfirm, withdrawConfirm,
- *   minDepositAmount, minWithdrawAmount, txUrl }] }] } }
+ * The live response is a flat list of coin + chain rows with NGN limits,
+ * not the nested shape Swagger documents; normalizeDepositAssets handles
+ * both (see utils/depositAssets.js).
  *
  * Without `coin` it lists every depositable coin; with `coin` it narrows to
  * that coin's chains. Short timeout: the chain lookup runs inside a WhatsApp
@@ -79,8 +81,9 @@ export async function depositCrypto({
 export async function getDepositAssets({ coin } = {}) {
   try {
     const token = getToken();
-    const params = { PageNo: 1, PageLimit: 100 };
-    if (coin) params.coin = coin;
+    // Same call as the backend's own example: no paging params. (PageLimit
+    // is passed straight to the provider, which may reject large values.)
+    const params = coin ? { coin } : {};
 
     const res = await axios.get(`${VIXA_API_BASE}/payment/crypto/deposits/assets`, {
       httpsAgent,
@@ -92,26 +95,20 @@ export async function getDepositAssets({ coin } = {}) {
       },
     });
 
-    const list = res.data?.data?.data;
-    if (!Array.isArray(list)) {
-      console.error(
-        "getDepositAssets: no asset list. Body:",
-        JSON.stringify(res.data)?.slice(0, 400),
-      );
-      return { success: false, assets: [], error: "No asset list" };
+    const assets = normalizeDepositAssets(res.data);
+    if (!assets) {
+      const body = JSON.stringify(res.data)?.slice(0, 400);
+      console.error("getDepositAssets: no asset list. Body:", body);
+      logger.error?.("deposit assets: no list", { coin: coin || null, status: res.status, body });
+      return { success: false, assets: [], error: res.data?.message || "No asset list" };
     }
-
-    const assets = list
-      .map((a) => ({
-        ...a,
-        coin: String(a?.coin || "").trim(),
-        chains: (a?.chains || []).filter((ch) => ch?.chain),
-      }))
-      .filter((a) => a.coin && a.chains.length);
 
     return { success: true, assets };
   } catch (err) {
-    console.error("getDepositAssets ERROR:", err?.response?.data || err?.message);
+    const status = err?.response?.status ?? null;
+    const body = JSON.stringify(err?.response?.data ?? err?.message)?.slice(0, 400);
+    console.error("getDepositAssets ERROR:", status, body);
+    logger.error?.("deposit assets: request failed", { coin: coin || null, status, body });
     return { success: false, assets: [], error: err?.response?.data || err?.message };
   }
 }

@@ -2,6 +2,7 @@
 import axios from "axios";
 import { AsyncLocalStorage } from "node:async_hooks";
 import { getSession, updateSession } from "./session.service.js";
+import { firstNameFrom } from "../utils/names.js";
 
 const VIXA_API_BASE =
   process.env.VIXA_API_BASE || "https://api.usevixa.com/api/v1";
@@ -48,7 +49,8 @@ function setContextToken(token, expiresAt) {
 // services/auth.service.js
 
 export async function loginUser({ phoneNumber, pin, deviceId = "" }) {
-  console.log(phoneNumber, pin, deviceId, "phoneNumber, pin, deviceId");
+  // Never log the PIN.
+  console.log("loginUser:", phoneNumber);
   try {
     const res = await axios.post(`${VIXA_API_BASE}/auth/login`, {
       phoneNumber,
@@ -70,6 +72,9 @@ export async function loginUser({ phoneNumber, pin, deviceId = "" }) {
 
     const isFullyOnboarded = res.data?.data?.isFullyOnboarded ?? null;
     const onboardingStage = res.data?.data?.onboardingStage ?? null;
+    // Login returns the profile as data.user (fullName, no firstName).
+    const user = res.data?.data?.user ?? null;
+    const firstName = firstNameFrom(user?.fullName);
 
     setContextToken(token, tokenExpiresAt);
 
@@ -82,10 +87,11 @@ export async function loginUser({ phoneNumber, pin, deviceId = "" }) {
         refreshTokenExpiresAt,
         isFullyOnboarded,
         onboardingStage,
+        ...(firstName ? { firstName } : {}),
       },
     });
 
-    return { token, isFullyOnboarded, onboardingStage };
+    return { token, isFullyOnboarded, onboardingStage, user };
   } catch (err) {
     console.error("loginUser ERROR:", err?.response?.data || err.message);
     throw err;

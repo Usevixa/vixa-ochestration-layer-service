@@ -14,7 +14,11 @@ import {
   isSessionTokenValid,
   runWithUserContext,
 } from "../services/auth.service.js";
-import { fetchAuthMe } from "../services/user.service.js";
+import {
+  fetchAuthMe,
+  displayName,
+  withName,
+} from "../services/user.service.js";
 import {
   depositCrypto,
   getDepositAssets,
@@ -71,6 +75,7 @@ import {
 import { transcribeAudio } from "../services/transcription.service.js";
 import { normalizeSpokenText } from "../utils/spokenNumbers.js";
 import { chainLabel } from "../utils/chainNames.js";
+import { ngnLimits } from "../utils/depositAssets.js";
 const router = express.Router();
 
 // Environment configuration (Replace with environment variables in production)
@@ -1593,7 +1598,7 @@ router.post("/callback", async (req, res) => {
                       year: "numeric",
                     });
 
-                    let balanceText = `Hi ${me.firstName} 👋\n\n💼 *Your Wallet Balances*\n\n`;
+                    let balanceText = `Hi${withName(me)} 👋\n\n💼 *Your Wallet Balances*\n\n`;
 
                     if (!balances || balances.length === 0) {
                       balanceText += "You currently have no wallet balances.\n";
@@ -2436,8 +2441,10 @@ router.post("/callback", async (req, res) => {
                   return;
                 }
 
-                const MIN_DEPOSIT_NGN = 500;
-                const MAX_DEPOSIT_NGN = 30_000_000;
+                // Per coin + chain limits from the deposit assets API;
+                // the old fixed range is only the fallback.
+                const MIN_DEPOSIT_NGN = session.data?.depositMinNgn || 500;
+                const MAX_DEPOSIT_NGN = session.data?.depositMaxNgn || 30_000_000;
                 if (amountNgn < MIN_DEPOSIT_NGN || amountNgn > MAX_DEPOSIT_NGN) {
                   await sendWhatsApp(
                     from,
@@ -4084,7 +4091,7 @@ async function handleKycSubmission(phone, phone_number_id, form) {
 
   await sendWhatsApp(
     phone,
-    `✅ *You're verified, ${me.firstName}!*\n\n` +
+    `✅ *You're verified${withName(me) ? "," + withName(me) : ""}!*\n\n` +
       `I'm VIXA, your AI-powered wallet assistant. I'll help you send, receive, convert and manage money — NGN and crypto (USDT, BTC, ETH) — right here on WhatsApp.\n\n` +
       `For your security, please make sure your WhatsApp is locked 🔒\n\n` +
       `Let's get started 🚀`,
@@ -4217,8 +4224,15 @@ async function handlePinFlowSubmission({
 
         // loginResult now has { token, isFullyOnboarded, onboardingStage }
         const { isFullyOnboarded, onboardingStage } = loginResult;
-        const me = await fetchAuthMe();
-        if (!me) throw new Error("ME_NOT_FOUND");
+
+        // The PIN is already accepted at this point. /auth/me is only used for
+        // the greeting name, so a failure here must not be reported as
+        // "Incorrect PIN" (which is what the catch below says).
+        const me = await fetchAuthMe().catch((err) => {
+          console.error("Login: fetchAuthMe failed:", err?.message);
+          return null;
+        });
+        const greetName = withName(me) || withName(loginResult.user);
 
         // Re-read session so we get the tokenExpiresAt that loginUser() just wrote
         const freshSession = await getSession(phone);
@@ -4244,7 +4258,7 @@ async function handlePinFlowSubmission({
           if (onboardingStage === "BasicInfoCompleted") {
             await sendWhatsApp(
               phone,
-              `👋 Welcome back ${me.firstName}!\n\nYour identity verification (KYC) isn't done yet. Complete it to unlock deposits, withdrawals, transfers and swaps 👇`,
+              `👋 Welcome back${greetName}!\n\nYour identity verification (KYC) isn't done yet. Complete it to unlock deposits, withdrawals, transfers and swaps 👇`,
               phone_number_id,
             );
             await triggerKYCFlow(phone, phone_number_id);
@@ -4255,7 +4269,7 @@ async function handlePinFlowSubmission({
           if (onboardingStage === "NinSubmitted") {
             await sendWhatsApp(
               phone,
-              `👋 Welcome back ${me.firstName}!\n\n⏳ Your NIN is still under review. Once it's approved, we'll send you a message here to confirm your BVN.`,
+              `👋 Welcome back${greetName}!\n\n⏳ Your NIN is still under review. Once it's approved, we'll send you a message here to confirm your BVN.`,
               phone_number_id,
             );
             await sendMainMenu(phone, phone_number_id);
@@ -4266,7 +4280,7 @@ async function handlePinFlowSubmission({
           if (onboardingStage === "NinVerified") {
             await sendWhatsApp(
               phone,
-              `👋 Welcome back ${me.firstName}!\n\nYour NIN is verified. Please confirm your BVN to finish your verification 👇`,
+              `👋 Welcome back${greetName}!\n\nYour NIN is verified. Please confirm your BVN to finish your verification 👇`,
               phone_number_id,
             );
             await triggerBVNFlow(phone, phone_number_id);
@@ -4276,7 +4290,7 @@ async function handlePinFlowSubmission({
           if (onboardingStage === "BvnVerified") {
             await sendWhatsApp(
               phone,
-              `👋 Welcome back ${me.firstName}!\n\nYour BVN has been verified. Your wallet is currently being set up — this usually takes just a moment.\n\nYou can go ahead and explore VIXA in the meantime 👇`,
+              `👋 Welcome back${greetName}!\n\nYour BVN has been verified. Your wallet is currently being set up — this usually takes just a moment.\n\nYou can go ahead and explore VIXA in the meantime 👇`,
               phone_number_id,
             );
             await sendMainMenu(phone, phone_number_id);
@@ -4286,7 +4300,7 @@ async function handlePinFlowSubmission({
 
         await sendWhatsApp(
           phone,
-          `Welcome back ${me.firstName} 👋`,
+          `Welcome back${greetName} 👋`,
           phone_number_id,
         );
 
@@ -5749,7 +5763,7 @@ async function routeToFlow(flow, from, phone_number_id, sessionData) {
         day: "numeric",
         year: "numeric",
       });
-      let balanceText = `Hi ${me.firstName} 👋\n\n💼 *Your Wallet Balances*\n\n`;
+      let balanceText = `Hi${withName(me)} 👋\n\n💼 *Your Wallet Balances*\n\n`;
       balanceText += balances?.length
         ? balances.map((b) => `• ${b.coin}: ${b.balance}`).join("\n")
         : "You currently have no wallet balances.";
@@ -6315,6 +6329,8 @@ async function startDeposit(to, phone_number_id, sessionData) {
       awaitingDepositPin: false,
       depositCoin: null,
       depositChain: null,
+      depositMinNgn: null,
+      depositMaxNgn: null,
       depositCurrency: "NGN",
     },
   });
@@ -6467,12 +6483,13 @@ async function buildDepositChainScreen(coin, flowToken) {
   }
 
   const chains = asset.chains.slice(0, 200).map((ch) => {
+    const range = ngnRangeText(ngnLimits(ch));
     const min = ch.minDepositAmount ? `Min: ${ch.minDepositAmount} ${asset.coin}` : "";
     const conf = ch.depositConfirm ? `${ch.depositConfirm} confirmations` : "";
     return {
       id: String(ch.chain),
       title: chainLabel(ch.chain).substring(0, 30),
-      description: ([min, conf].filter(Boolean).join(" · ") || "—").substring(0, 60),
+      description: (range || [min, conf].filter(Boolean).join(" · ") || "—").substring(0, 60),
     };
   });
 
@@ -6500,6 +6517,20 @@ async function handleDepositAssetSelection({ phone, phone_number_id, coin, chain
     return;
   }
 
+  // NGN limits for this coin + chain, so the amount check matches what the
+  // backend will accept. Not fatal: without them the defaults apply.
+  let limits = null;
+  try {
+    const res = await getDepositAssets({ coin });
+    const asset = res.assets.find(
+      (a) => a.coin.toUpperCase() === String(coin).toUpperCase(),
+    );
+    const row = asset?.chains.find((ch) => String(ch.chain) === String(chain));
+    limits = ngnLimits(row);
+  } catch (err) {
+    console.error("Deposit limits lookup failed:", err?.message);
+  }
+
   const session = await getSession(phone);
   await updateSession(phone, {
     data: {
@@ -6510,14 +6541,27 @@ async function handleDepositAssetSelection({ phone, phone_number_id, coin, chain
       depositCoin: coin,
       depositChain: chain,
       depositCurrency: "NGN",
+      depositMinNgn: limits?.min ?? null,
+      depositMaxNgn: limits?.max ?? null,
     },
   });
 
+  const range = ngnRangeText(limits);
   await sendWhatsApp(
     phone,
-    `💰 Please enter the amount in NGN you want to deposit for your *${coin}* wallet (${chainLabel(chain)}):`,
+    `💰 Please enter the amount in NGN you want to deposit for your *${coin}* wallet (${chainLabel(chain)}):` +
+      (range ? `\n\nAllowed: ${range}` : ""),
     phone_number_id,
   );
+}
+
+/** "₦5,000 – ₦1,500,000", "Min ₦5,000", "Max ₦1,500,000" or "". */
+function ngnRangeText(limits) {
+  const fmt = (n) => `₦${Number(n).toLocaleString("en-NG")}`;
+  if (limits?.min && limits?.max) return `${fmt(limits.min)} – ${fmt(limits.max)}`;
+  if (limits?.min) return `Min ${fmt(limits.min)}`;
+  if (limits?.max) return `Max ${fmt(limits.max)}`;
+  return "";
 }
 
 /**
