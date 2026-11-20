@@ -4221,8 +4221,15 @@ async function handlePinFlowSubmission({
 
         // loginResult now has { token, isFullyOnboarded, onboardingStage }
         const { isFullyOnboarded, onboardingStage } = loginResult;
-        const me = await fetchAuthMe();
-        if (!me) throw new Error("ME_NOT_FOUND");
+
+        // The PIN is already accepted at this point. /auth/me is only used for
+        // the greeting name, so a failure here must not be reported as
+        // "Incorrect PIN" (which is what the catch below says).
+        const me = await fetchAuthMe().catch((err) => {
+          console.error("Login: fetchAuthMe failed:", err?.message);
+          return null;
+        });
+        const greetName = withName(me) || withName(loginResult.user);
 
         // Re-read session so we get the tokenExpiresAt that loginUser() just wrote
         const freshSession = await getSession(phone);
@@ -4248,7 +4255,7 @@ async function handlePinFlowSubmission({
           if (onboardingStage === "BasicInfoCompleted") {
             await sendWhatsApp(
               phone,
-              `👋 Welcome back${withName(me)}!\n\nYour identity verification (KYC) isn't done yet. Complete it to unlock deposits, withdrawals, transfers and swaps 👇`,
+              `👋 Welcome back${greetName}!\n\nYour identity verification (KYC) isn't done yet. Complete it to unlock deposits, withdrawals, transfers and swaps 👇`,
               phone_number_id,
             );
             await triggerKYCFlow(phone, phone_number_id);
@@ -4259,7 +4266,7 @@ async function handlePinFlowSubmission({
           if (onboardingStage === "NinSubmitted") {
             await sendWhatsApp(
               phone,
-              `👋 Welcome back${withName(me)}!\n\n⏳ Your NIN is still under review. Once it's approved, we'll send you a message here to confirm your BVN.`,
+              `👋 Welcome back${greetName}!\n\n⏳ Your NIN is still under review. Once it's approved, we'll send you a message here to confirm your BVN.`,
               phone_number_id,
             );
             await sendMainMenu(phone, phone_number_id);
@@ -4270,7 +4277,7 @@ async function handlePinFlowSubmission({
           if (onboardingStage === "NinVerified") {
             await sendWhatsApp(
               phone,
-              `👋 Welcome back${withName(me)}!\n\nYour NIN is verified. Please confirm your BVN to finish your verification 👇`,
+              `👋 Welcome back${greetName}!\n\nYour NIN is verified. Please confirm your BVN to finish your verification 👇`,
               phone_number_id,
             );
             await triggerBVNFlow(phone, phone_number_id);
@@ -4280,7 +4287,7 @@ async function handlePinFlowSubmission({
           if (onboardingStage === "BvnVerified") {
             await sendWhatsApp(
               phone,
-              `👋 Welcome back${withName(me)}!\n\nYour BVN has been verified. Your wallet is currently being set up — this usually takes just a moment.\n\nYou can go ahead and explore VIXA in the meantime 👇`,
+              `👋 Welcome back${greetName}!\n\nYour BVN has been verified. Your wallet is currently being set up — this usually takes just a moment.\n\nYou can go ahead and explore VIXA in the meantime 👇`,
               phone_number_id,
             );
             await sendMainMenu(phone, phone_number_id);
@@ -4290,7 +4297,7 @@ async function handlePinFlowSubmission({
 
         await sendWhatsApp(
           phone,
-          `Welcome back${withName(me)} 👋`,
+          `Welcome back${greetName} 👋`,
           phone_number_id,
         );
 

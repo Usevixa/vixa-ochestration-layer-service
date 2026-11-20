@@ -1,5 +1,5 @@
 // node tests/displayName.unit.mjs
-import { displayName, withName } from "../src/services/user.service.js";
+import { displayName, withName } from "../src/utils/names.js";
 
 const cases = [
   [{ firstName: "Tobi" }, "Tobi", " Tobi"],
@@ -11,6 +11,10 @@ const cases = [
   [{ firstName: "undefined" }, "", ""],
   [{ firstName: "null" }, "", ""],
   [{ firstName: "" }, "", ""],
+  [{ fullName: "Ada Obi" }, "Ada", " Ada"], // /auth/me with fullName only
+  [{ id: "1", fullName: "  Tobi  Salvo " }, "Tobi", " Tobi"], // login data.user
+  [{ user: { fullName: "Ada Obi" } }, "Ada", " Ada"],
+  [{ fullName: "undefined" }, "", ""],
 ];
 
 let failed = 0;

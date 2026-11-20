@@ -1,6 +1,8 @@
 // services/user.service.js
 import axios from "axios";
 import { getToken } from "./auth.service.js";
+import { displayName } from "../utils/names.js";
+export { displayName, withName } from "../utils/names.js";
 const VIXA_API_BASE = process.env.VIXA_API_BASE || "https://api.usevixa.com/api/v1";
 
 export async function fetchAuthMe() {
@@ -31,7 +33,7 @@ export async function fetchAuthMe() {
     if (!displayName(me)) {
       // Field names only — never log profile values.
       console.warn(
-        "fetchAuthMe: no firstName in profile. Keys:",
+        "fetchAuthMe: no first name in profile. Keys:",
         Object.keys(me || {}).join(", "),
       );
     }
@@ -45,19 +47,3 @@ export async function fetchAuthMe() {
   }
 }
 
-/**
- * The user's first name for greetings, or "" when there isn't a usable one.
- * Guards against the strings "undefined"/"null" that template literals
- * produce from missing values, so a greeting never shows them.
- */
-export function displayName(me) {
-  const raw = me?.firstName ?? me?.data?.firstName ?? "";
-  const name = String(raw).trim();
-  return /^(undefined|null)$/i.test(name) ? "" : name;
-}
-
-/** " Name" for "Welcome back${withName(me)}", or "" when there's no name. */
-export function withName(me) {
-  const name = displayName(me);
-  return name ? ` ${name}` : "";
-}
