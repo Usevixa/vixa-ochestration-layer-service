@@ -75,6 +75,7 @@ import {
 import { transcribeAudio } from "../services/transcription.service.js";
 import { normalizeSpokenText } from "../utils/spokenNumbers.js";
 import { chainLabel } from "../utils/chainNames.js";
+import { ngnLimits } from "../utils/depositAssets.js";
 const router = express.Router();
 
 // Environment configuration (Replace with environment variables in production)
@@ -2440,8 +2441,10 @@ router.post("/callback", async (req, res) => {
                   return;
                 }
 
-                const MIN_DEPOSIT_NGN = 500;
-                const MAX_DEPOSIT_NGN = 30_000_000;
+                // Per coin + chain limits from the deposit assets API;
+                // the old fixed range is only the fallback.
+                const MIN_DEPOSIT_NGN = session.data?.depositMinNgn || 500;
+                const MAX_DEPOSIT_NGN = session.data?.depositMaxNgn || 30_000_000;
                 if (amountNgn < MIN_DEPOSIT_NGN || amountNgn > MAX_DEPOSIT_NGN) {
                   await sendWhatsApp(
                     from,
@@ -6326,6 +6329,8 @@ async function startDeposit(to, phone_number_id, sessionData) {
       awaitingDepositPin: false,
       depositCoin: null,
       depositChain: null,
+      depositMinNgn: null,
+      depositMaxNgn: null,
       depositCurrency: "NGN",
     },
   });
@@ -6478,12 +6483,13 @@ async function buildDepositChainScreen(coin, flowToken) {
   }
 
   const chains = asset.chains.slice(0, 200).map((ch) => {
+    const range = ngnRangeText(ngnLimits(ch));
     const min = ch.minDepositAmount ? `Min: ${ch.minDepositAmount} ${asset.coin}` : "";
     const conf = ch.depositConfirm ? `${ch.depositConfirm} confirmations` : "";
     return {
       id: String(ch.chain),
       title: chainLabel(ch.chain).substring(0, 30),
-      description: ([min, conf].filter(Boolean).join(" · ") || "—").substring(0, 60),
+      description: (range || [min, conf].filter(Boolean).join(" · ") || "—").substring(0, 60),
     };
   });
 
@@ -6511,6 +6517,20 @@ async function handleDepositAssetSelection({ phone, phone_number_id, coin, chain
     return;
   }
 
+  // NGN limits for this coin + chain, so the amount check matches what the
+  // backend will accept. Not fatal: without them the defaults apply.
+  let limits = null;
+  try {
+    const res = await getDepositAssets({ coin });
+    const asset = res.assets.find(
+      (a) => a.coin.toUpperCase() === String(coin).toUpperCase(),
+    );
+    const row = asset?.chains.find((ch) => String(ch.chain) === String(chain));
+    limits = ngnLimits(row);
+  } catch (err) {
+    console.error("Deposit limits lookup failed:", err?.message);
+  }
+
   const session = await getSession(phone);
   await updateSession(phone, {
     data: {
@@ -6521,14 +6541,27 @@ async function handleDepositAssetSelection({ phone, phone_number_id, coin, chain
       depositCoin: coin,
       depositChain: chain,
       depositCurrency: "NGN",
+      depositMinNgn: limits?.min ?? null,
+      depositMaxNgn: limits?.max ?? null,
     },
   });
 
+  const range = ngnRangeText(limits);
   await sendWhatsApp(
     phone,
-    `💰 Please enter the amount in NGN you want to deposit for your *${coin}* wallet (${chainLabel(chain)}):`,
+    `💰 Please enter the amount in NGN you want to deposit for your *${coin}* wallet (${chainLabel(chain)}):` +
+      (range ? `\n\nAllowed: ${range}` : ""),
     phone_number_id,
   );
+}
+
+/** "₦5,000 – ₦1,500,000", "Min ₦5,000", "Max ₦1,500,000" or "". */
+function ngnRangeText(limits) {
+  const fmt = (n) => `₦${Number(n).toLocaleString("en-NG")}`;
+  if (limits?.min && limits?.max) return `${fmt(limits.min)} – ${fmt(limits.max)}`;
+  if (limits?.min) return `Min ${fmt(limits.min)}`;
+  if (limits?.max) return `Max ${fmt(limits.max)}`;
+  return "";
 }
 
 /**

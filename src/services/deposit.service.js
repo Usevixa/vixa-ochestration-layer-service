@@ -3,6 +3,7 @@ import axios from "axios";
 import { getToken } from "./auth.service.js";
 import https from "https";
 import logger from "../lib/logger.js";
+import { normalizeDepositAssets } from "../utils/depositAssets.js";
 
 const VIXA_API_BASE = process.env.VIXA_API_BASE || "https://api.usevixa.com/api/v1";
 
@@ -67,9 +68,9 @@ export async function depositCrypto({
 
 /**
  * GET /payment/crypto/deposits/assets[?coin=]
- * Response: { success, message, data: { success, data: [{ coin, iconUrl,
- *   chains: [{ chain, needTag, depositConfirm, withdrawConfirm,
- *   minDepositAmount, minWithdrawAmount, txUrl }] }] } }
+ * The live response is a flat list of coin + chain rows with NGN limits,
+ * not the nested shape Swagger documents; normalizeDepositAssets handles
+ * both (see utils/depositAssets.js).
  *
  * Without `coin` it lists every depositable coin; with `coin` it narrows to
  * that coin's chains. Short timeout: the chain lookup runs inside a WhatsApp
@@ -94,22 +95,13 @@ export async function getDepositAssets({ coin } = {}) {
       },
     });
 
-    // { success, message, data: { success, data: [...] } }
-    const list = res.data?.data?.data;
-    if (!Array.isArray(list)) {
+    const assets = normalizeDepositAssets(res.data);
+    if (!assets) {
       const body = JSON.stringify(res.data)?.slice(0, 400);
       console.error("getDepositAssets: no asset list. Body:", body);
       logger.error?.("deposit assets: no list", { coin: coin || null, status: res.status, body });
       return { success: false, assets: [], error: res.data?.message || "No asset list" };
     }
-
-    const assets = list
-      .map((a) => ({
-        ...a,
-        coin: String(a?.coin || "").trim(),
-        chains: (a?.chains || []).filter((ch) => ch?.chain),
-      }))
-      .filter((a) => a.coin && a.chains.length);
 
     return { success: true, assets };
   } catch (err) {
