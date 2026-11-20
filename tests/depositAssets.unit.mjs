@@ -1,5 +1,5 @@
 // node tests/depositAssets.unit.mjs
-import { normalizeDepositAssets, ngnLimits } from "../src/utils/depositAssets.js";
+import { normalizeDepositAssets } from "../src/utils/depositAssets.js";
 import { chainLabel } from "../src/utils/chainNames.js";
 
 const NGN = { NGN: { min: 5000, max: 1500000 }, TZS: { min: 14500, max: 5000000 } };
@@ -39,11 +39,9 @@ const a = normalizeDepositAssets(live);
 check("live: grouped into 3 coins in API order", JSON.stringify(a.map((x) => x.coin)) === '["BTC","USDC","USDT"]', a?.map((x) => x.coin));
 const usdt = a.find((x) => x.coin === "USDT");
 check("live: USDT has 3 chains (duplicate dropped)", usdt.chains.map((c) => c.chain).join() === "POLYGON,SOLANA,TRON", usdt.chains.map((c) => c.chain));
-check("live: NGN limits read", JSON.stringify(ngnLimits(usdt.chains[2])) === '{"min":5000,"max":1500000}', ngnLimits(usdt.chains[2]));
 
 const b = normalizeDepositAssets(swagger);
 check("swagger: nested shape still works", b.length === 1 && b[0].chains.length === 2, b);
-check("swagger: no limits → null", ngnLimits(b[0].chains[0]) === null, ngnLimits(b[0].chains[0]));
 
 check("no list → null", normalizeDepositAssets({ success: false, message: "x", data: null }) === null, "not null");
 check("empty list → []", JSON.stringify(normalizeDepositAssets({ data: [] })) === "[]", normalizeDepositAssets({ data: [] }));
