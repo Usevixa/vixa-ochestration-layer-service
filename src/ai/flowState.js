@@ -62,16 +62,15 @@ export function describeFlowState(sessionData) {
     });
   }
 
-  // ── Deposit (NGN → USDT) ───────────────────────────────────────
+  // ── Deposit (NGN → chosen coin) ────────────────────────────────
   if (d.pendingDeposit) {
+    const coin = d.depositCoin || "USDT";
     return state({
       flow: "DEPOSIT",
       step: "ENTER_AMOUNT",
       expecting: "amount",
-      describe:
-        "In the DEPOSIT flow. Waiting for the amount in Nigerian Naira (NGN) the user wants to convert into USDT. Minimum ₦500, maximum ₦30,000,000.",
-      rePrompt:
-        "💰 Please enter the amount in NGN you want to deposit for your USDT wallet:",
+      describe: `In the DEPOSIT flow. Waiting for the amount in Nigerian Naira (NGN) the user wants to convert into ${coin}. Minimum ₦500, maximum ₦30,000,000.`,
+      rePrompt: `💰 Please enter the amount in NGN you want to deposit for your ${coin} wallet:`,
     });
   }
 

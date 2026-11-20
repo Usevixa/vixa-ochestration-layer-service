@@ -32,6 +32,7 @@ console.log = (...a) => {
   const s = a.map(String).join(" ");
   if (s.startsWith("[MOCK send]")) sent.push(a[2]);
   if (s.startsWith("[MOCK ITEM FLOW]")) sent.push("<item-selection flow sent>");
+  if (s.startsWith("[MOCK DEPOSIT ASSET FLOW]")) sent.push("<deposit asset flow sent>");
   if (s.startsWith("[MOCK PIN FLOW]")) sent.push("<PIN flow sent: " + s.split("context:")[1]?.trim() + ">");
   if (s.startsWith("[MOCK FLOW]")) sent.push("<onboarding flow sent>");
 };
@@ -141,7 +142,8 @@ const BLANK = {
 const cases = [
   ["THE SCREENSHOT BUG: cancel+switch mid-deposit", "Scratch that I want to swap", { ...BLANK, pendingDeposit: true }, /swap|couldn't open/i],
   ["Swap entry, API down (was silent)", "Swap", { ...BLANK }, /available|couldn't open|swap/i],
-  ["Deposit entry", "I want to deposit", { ...BLANK }, /amount in NGN/i],
+  // Opens the coin/chain Flow; with the API or flow ID missing it must say so, not go silent.
+  ["Deposit entry", "I want to deposit", { ...BLANK }, /deposit asset flow sent|deposit options|deposits are unavailable/i],
   ["Amount below minimum", "400", { ...BLANK, pendingDeposit: true }, /between ₦500/i],
   ["'5k' normalises to 5000 (passes min)", "5k", { ...BLANK, pendingDeposit: true }, /^(?!.*between ₦500)/i],
   ["Question mid-flow keeps place", "What does this mean?", { ...BLANK, pendingDeposit: true }, /amount in NGN/i],
