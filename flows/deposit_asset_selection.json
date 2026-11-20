@@ -1,0 +1,140 @@
+{
+  "version": "7.3",
+  "data_api_version": "3.0",
+  "routing_model": {
+    "SELECT_COIN": ["SELECT_CHAIN"],
+    "SELECT_CHAIN": []
+  },
+  "screens": [
+    {
+      "id": "SELECT_COIN",
+      "title": "Deposit Crypto",
+      "data": {
+        "heading": {
+          "type": "string",
+          "__example__": "Which coin do you want to deposit?"
+        },
+        "coins": {
+          "type": "array",
+          "__example__": [
+            { "id": "USDT", "title": "USDT", "description": "3 networks available" },
+            { "id": "USDC", "title": "USDC", "description": "2 networks available" },
+            { "id": "BTC", "title": "BTC", "description": "1 network available" }
+          ],
+          "items": {
+            "type": "object",
+            "properties": {
+              "id": { "type": "string" },
+              "title": { "type": "string" },
+              "description": { "type": "string" }
+            }
+          }
+        }
+      },
+      "layout": {
+        "type": "SingleColumnLayout",
+        "children": [
+          {
+            "type": "Form",
+            "name": "coin_form",
+            "children": [
+              {
+                "type": "TextSubheading",
+                "text": "${data.heading}"
+              },
+              {
+                "type": "Dropdown",
+                "name": "selected_coin",
+                "label": "Coin",
+                "required": true,
+                "data-source": "${data.coins}"
+              },
+              {
+                "type": "Footer",
+                "label": "Next",
+                "on-click-action": {
+                  "name": "data_exchange",
+                  "payload": {
+                    "coin": "${form.selected_coin}"
+                  }
+                }
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "SELECT_CHAIN",
+      "title": "Select Network",
+      "terminal": true,
+      "data": {
+        "coin": {
+          "type": "string",
+          "__example__": "USDT"
+        },
+        "heading": {
+          "type": "string",
+          "__example__": "Select the network for your USDT deposit"
+        },
+        "notice": {
+          "type": "string",
+          "__example__": "Only send USDT on the network you pick. Sending on the wrong network can lose your funds."
+        },
+        "chains": {
+          "type": "array",
+          "__example__": [
+            { "id": "TRX", "title": "TRON (TRC20)", "description": "Min: 1 USDT · 20 confirmations" },
+            { "id": "ETH", "title": "Ethereum (ERC20)", "description": "Min: 10 USDT · 12 confirmations" },
+            { "id": "BSC", "title": "BNB Smart Chain (BEP20)", "description": "Min: 1 USDT · 15 confirmations" }
+          ],
+          "items": {
+            "type": "object",
+            "properties": {
+              "id": { "type": "string" },
+              "title": { "type": "string" },
+              "description": { "type": "string" }
+            }
+          }
+        }
+      },
+      "layout": {
+        "type": "SingleColumnLayout",
+        "children": [
+          {
+            "type": "Form",
+            "name": "chain_form",
+            "children": [
+              {
+                "type": "TextSubheading",
+                "text": "${data.heading}"
+              },
+              {
+                "type": "Dropdown",
+                "name": "selected_chain",
+                "label": "Network",
+                "required": true,
+                "data-source": "${data.chains}"
+              },
+              {
+                "type": "TextCaption",
+                "text": "${data.notice}"
+              },
+              {
+                "type": "Footer",
+                "label": "Continue",
+                "on-click-action": {
+                  "name": "complete",
+                  "payload": {
+                    "coin": "${data.coin}",
+                    "chain": "${form.selected_chain}"
+                  }
+                }
+              }
+            ]
+          }
+        ]
+      }
+    }
+  ]
+}

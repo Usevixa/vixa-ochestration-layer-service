@@ -15,7 +15,10 @@ import {
   runWithUserContext,
 } from "../services/auth.service.js";
 import { fetchAuthMe } from "../services/user.service.js";
-import { depositCrypto } from "../services/deposit.service.js";
+import {
+  depositCrypto,
+  getDepositAssets,
+} from "../services/deposit.service.js";
 import { randomUUID } from "node:crypto";
 import { fetchWalletBalances } from "../services/wallet.service.js";
 import { fetchReceiveWallets } from "../services/recieve.service.js";
@@ -67,6 +70,7 @@ import {
 } from "../utils/whatsappMedia.js";
 import { transcribeAudio } from "../services/transcription.service.js";
 import { normalizeSpokenText } from "../utils/spokenNumbers.js";
+import { chainLabel } from "../utils/chainNames.js";
 const router = express.Router();
 
 // Environment configuration (Replace with environment variables in production)
@@ -87,6 +91,7 @@ const BVN_FLOW_ID = process.env.BVN_FLOW_ID;
 const BANK_SELECTION_FLOW_ID = process.env.BANK_SELECTION_FLOW_ID;
 const COUNTRY_SELECTION_FLOW_ID = process.env.COUNTRY_SELECTION_FLOW_ID;
 const ITEM_SELECTION_FLOW_ID = process.env.ITEM_SELECTION_FLOW_ID;
+const DEPOSIT_ASSET_FLOW_ID = process.env.DEPOSIT_ASSET_FLOW_ID;
 const KYC_FLOW_ID = process.env.KYC_FLOW_ID;
 
 function formatDobToISO(dob) {
@@ -1458,26 +1463,9 @@ router.post("/callback", async (req, res) => {
 
                 case "DEPOSIT_CRYPTO": {
                   try {
-                    // 1. Get session (we need phone + pin)
-                    const session = await getSession(from);
-                    await updateSession(from, {
-                      data: {
-                        ...(session.data || {}),
-                        phone_number_id,
-                        pendingDeposit: true, // flag to indicate user is about to enter amount
-                        depositCoin: "USDT", // default for now, can be dynamic
-                        depositChain: "SOL", // default for now
-                        depositCurrency: "NGN", // default for now
-                      },
-                    });
-
-                    await sendWhatsApp(
-                      from,
-                      `💰 Please enter the amount in NGN you want to deposit for your ${
-                        session.data?.depositCoin || "USDT"
-                      } wallet:`,
-                      phone_number_id,
-                    );
+                    // Coin + chain are picked in the deposit asset Flow;
+                    // the amount prompt follows its completion.
+                    await startDeposit(from, phone_number_id);
                   } catch (err) {
                     console.error("DEPOSIT_CRYPTO init error:", err);
                     await sendWhatsApp(
@@ -3649,6 +3637,16 @@ async function processFlowCompletion(phone, phone_number_id, form) {
     return;
   }
 
+  if (flowToken.includes("::DEPOSIT_ASSET")) {
+    await handleDepositAssetSelection({
+      phone,
+      phone_number_id,
+      coin: form.coin,
+      chain: form.chain,
+    });
+    return;
+  }
+
   if (flowToken.includes("::ITEM_SELECT")) {
     const selectedId = form.selected_item_id;
     const itemContext = flowToken.split("::")[2] || null;
@@ -4131,6 +4129,9 @@ router.post("/flow/callback", async (req, res) => {
           screen: "SELECT_COUNTRY",
           data: { countries: data.countries || [] },
         };
+      } else if (screen === "SELECT_COIN") {
+        // Deposit asset Flow: the user picked a coin, load its chains.
+        responsePayload = await buildDepositChainScreen(data?.coin, flow_token);
       } else if (screen === "SELECT_ITEM") {
         responsePayload = {
           screen: "SELECT_ITEM",
@@ -4358,6 +4359,7 @@ async function handlePinFlowSubmission({
         amountLocal: session.data.depositAmount,
         channelId: "9ae16e52-d562-4d8c-85ec-252ad247d0af",
         coin: session.data.depositCoin,
+        chain: session.data.depositChain,
         correlationId: `CORR-${Date.now()}`,
         idempotencyKey: `IDEMPOTENCY-${Date.now()}`,
         pin,
@@ -5662,20 +5664,7 @@ async function safeRouteToFlow(flow, from, phone_number_id, sessionData) {
 async function routeToFlow(flow, from, phone_number_id, sessionData) {
   switch (flow) {
     case "DEPOSIT": {
-      await updateSession(from, {
-        data: {
-          ...sessionData,
-          pendingDeposit: true,
-          depositCoin: "USDT",
-          depositChain: "SOL",
-          depositCurrency: "NGN",
-        },
-      });
-      await sendWhatsApp(
-        from,
-        "💰 Please enter the amount in NGN you want to deposit for your USDT wallet:",
-        phone_number_id,
-      );
+      await startDeposit(from, phone_number_id, sessionData);
       break;
     }
     case "WITHDRAW": {
@@ -6303,6 +6292,232 @@ async function triggerCountrySelectionFlow(
   }
   console.log("triggerCountrySelectionFlow sent to", toPhone);
   return true;
+}
+
+/* ------------- Deposit: coin + chain selection Flow ------------- */
+
+/**
+ * Entry point for every deposit (menu button and AI intent). Loads the
+ * depositable coins and opens the deposit asset Flow (SELECT_COIN ->
+ * SELECT_CHAIN). The NGN amount is asked only after the Flow completes,
+ * in handleDepositAssetSelection.
+ */
+async function startDeposit(to, phone_number_id, sessionData) {
+  const base = sessionData ?? (await getSession(to)).data ?? {};
+
+  // No amount entry until coin + chain are chosen, so a stray text isn't
+  // taken as the deposit amount.
+  await updateSession(to, {
+    data: {
+      ...base,
+      phone_number_id,
+      pendingDeposit: false,
+      awaitingDepositPin: false,
+      depositCoin: null,
+      depositChain: null,
+      depositCurrency: "NGN",
+    },
+  });
+
+  if (!DEPOSIT_ASSET_FLOW_ID) {
+    console.error("startDeposit: DEPOSIT_ASSET_FLOW_ID is not set");
+    await sendWhatsApp(
+      to,
+      "⚠️ Deposits are unavailable right now. Please try again later.",
+      phone_number_id,
+    );
+    return;
+  }
+
+  const res = await getDepositAssets();
+  if (!res.success || !res.assets.length) {
+    await sendWhatsApp(
+      to,
+      res.success
+        ? "⚠️ No coins are available to deposit right now."
+        : "⚠️ Unable to load deposit options right now. Please try again shortly.",
+      phone_number_id,
+    );
+    return;
+  }
+
+  const coins = res.assets.slice(0, 200).map((a) => {
+    const n = a.chains.length;
+    return {
+      id: a.coin,
+      title: a.coin.substring(0, 30),
+      description: `${n} network${n === 1 ? "" : "s"} available`,
+    };
+  });
+
+  const sent = await triggerDepositAssetFlow(to, phone_number_id, coins);
+  if (!sent) {
+    await sendWhatsApp(
+      to,
+      "⚠️ Unable to open deposit options right now. Please try again shortly.",
+      phone_number_id,
+    );
+  }
+}
+
+async function triggerDepositAssetFlow(toPhone, phone_number_id, coins) {
+  if (!WHATSAPP_TOKEN || !phone_number_id) {
+    console.log("[MOCK DEPOSIT ASSET FLOW] to:", toPhone);
+    return false;
+  }
+
+  const url = `https://graph.facebook.com/${WHATSAPP_API_VERSION}/${phone_number_id}/messages`;
+
+  const body = {
+    messaging_product: "whatsapp",
+    to: toPhone,
+    type: "interactive",
+    interactive: {
+      type: "flow",
+      body: { text: "💰 Choose the coin and network you want to deposit" },
+      action: {
+        name: "flow",
+        parameters: {
+          flow_id: DEPOSIT_ASSET_FLOW_ID,
+          flow_token: `${toPhone}::DEPOSIT_ASSET`,
+          flow_cta: "Select Coin",
+          flow_message_version: "3",
+          flow_action: "navigate",
+          flow_action_payload: {
+            screen: "SELECT_COIN",
+            data: {
+              heading: "Which coin do you want to deposit?",
+              coins,
+            },
+          },
+        },
+      },
+    },
+  };
+
+  const res = await fetch(url, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${WHATSAPP_TOKEN}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(body),
+  });
+
+  if (!res.ok) {
+    const debug = await res.text();
+    console.error("triggerDepositAssetFlow failed:", res.status, debug);
+    logger.error?.("flow send rejected", {
+      flow: "DEPOSIT_ASSET",
+      status: res.status,
+      debug,
+    });
+    return false;
+  }
+  console.log("triggerDepositAssetFlow sent to", toPhone);
+  return true;
+}
+
+/**
+ * data_exchange response for the deposit asset Flow's "Next" tap: the
+ * SELECT_CHAIN screen for the chosen coin. On failure it stays on
+ * SELECT_COIN and WhatsApp shows `error_message` as a banner.
+ */
+async function buildDepositChainScreen(coin, flowToken) {
+  const stay = (error_message) => ({
+    screen: "SELECT_COIN",
+    data: { error_message },
+  });
+
+  if (!coin) return stay("Please select a coin.");
+
+  // The callback route runs outside any user context, and getToken() refuses
+  // to work there. The flow token is `${phone}::DEPOSIT_ASSET`, so open that
+  // user's context and restore (or silently refresh) their token first.
+  const phone = String(flowToken || "").split("::")[0];
+  if (!phone) return stay("Your session has expired. Please start the deposit again.");
+
+  const res = await runWithUserContext(phone, async () => {
+    let session = await getSession(phone);
+    restoreCachedToken(session.data);
+
+    if (!isSessionTokenValid(session.data) && session.data?.refreshToken) {
+      const r = await refreshAccessToken({
+        phoneNumber: phone,
+        refreshToken: session.data.refreshToken,
+      });
+      if (r?.success) {
+        session = await getSession(phone);
+        restoreCachedToken(session.data);
+      }
+    }
+
+    return getDepositAssets({ coin });
+  });
+  const wanted = String(coin).toUpperCase();
+  const asset = res.assets.find((a) => a.coin.toUpperCase() === wanted);
+
+  if (!res.success || !asset) {
+    console.error(
+      "buildDepositChainScreen: no chains for",
+      coin,
+      res.error || "(coin not in response)",
+    );
+    return stay(`Couldn't load networks for ${coin}. Please try again.`);
+  }
+
+  const chains = asset.chains.slice(0, 200).map((ch) => {
+    const min = ch.minDepositAmount ? `Min: ${ch.minDepositAmount} ${asset.coin}` : "";
+    const conf = ch.depositConfirm ? `${ch.depositConfirm} confirmations` : "";
+    return {
+      id: String(ch.chain),
+      title: chainLabel(ch.chain).substring(0, 30),
+      description: ([min, conf].filter(Boolean).join(" · ") || "—").substring(0, 60),
+    };
+  });
+
+  return {
+    screen: "SELECT_CHAIN",
+    data: {
+      coin: asset.coin,
+      heading: `Select the network for your ${asset.coin} deposit`,
+      notice: `Your ${asset.coin} will be credited on the network you pick.`,
+      chains,
+    },
+  };
+}
+
+/** Deposit asset Flow completed: store coin + chain, then ask the amount. */
+async function handleDepositAssetSelection({ phone, phone_number_id, coin, chain }) {
+  if (!coin || !chain) {
+    console.warn("Deposit asset flow completed without coin/chain:", { coin, chain });
+    await sendWhatsApp(
+      phone,
+      "⚠️ I didn't get your coin and network. Let's try that again.",
+      phone_number_id,
+    );
+    await startDeposit(phone, phone_number_id);
+    return;
+  }
+
+  const session = await getSession(phone);
+  await updateSession(phone, {
+    data: {
+      ...(session.data || {}),
+      phone_number_id,
+      pendingDeposit: true,
+      awaitingDepositPin: false,
+      depositCoin: coin,
+      depositChain: chain,
+      depositCurrency: "NGN",
+    },
+  });
+
+  await sendWhatsApp(
+    phone,
+    `💰 Please enter the amount in NGN you want to deposit for your *${coin}* wallet (${chainLabel(chain)}):`,
+    phone_number_id,
+  );
 }
 
 /**
