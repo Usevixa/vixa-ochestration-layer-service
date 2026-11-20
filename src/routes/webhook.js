@@ -2440,17 +2440,6 @@ router.post("/callback", async (req, res) => {
                   return;
                 }
 
-                const MIN_DEPOSIT_NGN = 500;
-                const MAX_DEPOSIT_NGN = 30_000_000;
-                if (amountNgn < MIN_DEPOSIT_NGN || amountNgn > MAX_DEPOSIT_NGN) {
-                  await sendWhatsApp(
-                    from,
-                    `⚠️ Deposit must be between ₦${MIN_DEPOSIT_NGN.toLocaleString()} and ₦${MAX_DEPOSIT_NGN.toLocaleString()}. Please enter a new amount.`,
-                    phone_number_id,
-                  );
-                  return;
-                }
-
                 const rateRes = await convertRate({
                   fromCurrency: session.data.depositCurrency || "NGN",
                   toCurrency: session.data.depositCoin || "USDT",

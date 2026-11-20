@@ -69,7 +69,7 @@ export function describeFlowState(sessionData) {
       flow: "DEPOSIT",
       step: "ENTER_AMOUNT",
       expecting: "amount",
-      describe: `In the DEPOSIT flow. Waiting for the amount in Nigerian Naira (NGN) the user wants to convert into ${coin}. Minimum ₦500, maximum ₦30,000,000.`,
+      describe: `In the DEPOSIT flow. Waiting for the amount in Nigerian Naira (NGN) the user wants to convert into ${coin}.`,
       rePrompt: `💰 Please enter the amount in NGN you want to deposit for your ${coin} wallet:`,
     });
   }

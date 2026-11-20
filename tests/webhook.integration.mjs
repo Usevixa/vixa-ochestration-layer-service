@@ -144,8 +144,8 @@ const cases = [
   ["Swap entry, API down (was silent)", "Swap", { ...BLANK }, /available|couldn't open|swap/i],
   // Opens the coin/chain Flow; with the API or flow ID missing it must say so, not go silent.
   ["Deposit entry", "I want to deposit", { ...BLANK }, /deposit asset flow sent|deposit options|deposits are unavailable/i],
-  ["Amount below minimum", "400", { ...BLANK, pendingDeposit: true }, /between ₦500/i],
-  ["'5k' normalises to 5000 (passes min)", "5k", { ...BLANK, pendingDeposit: true }, /^(?!.*between ₦500)/i],
+  ["Small amount goes on (no bot-side limit)", "400", { ...BLANK, pendingDeposit: true }, /^(?!.*between ₦)/i],
+  ["'5k' normalises to 5000", "5k", { ...BLANK, pendingDeposit: true }, /^(?!.*between ₦)/i],
   ["Question mid-flow keeps place", "What does this mean?", { ...BLANK, pendingDeposit: true }, /amount in NGN/i],
   ["Plain cancel", "cancel", { ...BLANK, pendingDeposit: true }, /cancelled/i],
   ["Text at a SELECT step (was a logout)", "hmm ok", { ...BLANK, swap: { step: "SELECT_FROM" } }, /didn't|swap/i],
