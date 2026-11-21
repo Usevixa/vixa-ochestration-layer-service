@@ -65,13 +65,11 @@ export function describeFlowState(sessionData) {
   // ── Deposit (NGN → chosen coin) ────────────────────────────────
   if (d.pendingDeposit) {
     const coin = d.depositCoin || "USDT";
-    const min = Number(d.depositMinNgn || 500).toLocaleString("en-NG");
-    const max = Number(d.depositMaxNgn || 30_000_000).toLocaleString("en-NG");
     return state({
       flow: "DEPOSIT",
       step: "ENTER_AMOUNT",
       expecting: "amount",
-      describe: `In the DEPOSIT flow. Waiting for the amount in Nigerian Naira (NGN) the user wants to convert into ${coin}. Minimum ₦${min}, maximum ₦${max}.`,
+      describe: `In the DEPOSIT flow. Waiting for the amount in Nigerian Naira (NGN) the user wants to convert into ${coin}.`,
       rePrompt: `💰 Please enter the amount in NGN you want to deposit for your ${coin} wallet:`,
     });
   }

@@ -44,12 +44,3 @@ export function normalizeDepositAssets(body) {
 
   return [...byCoin.values()].filter((a) => a.chains.length);
 }
-
-/** NGN { min, max } for a chain row, or null when it has no usable NGN limits. */
-export function ngnLimits(chain) {
-  const l = chain?.limits?.NGN;
-  const min = Number(l?.min);
-  const max = Number(l?.max);
-  if (!(min > 0) && !(max > 0)) return null;
-  return { min: min > 0 ? min : null, max: max > 0 ? max : null };
-}
