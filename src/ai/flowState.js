@@ -246,9 +246,8 @@ export function describeFlowState(sessionData) {
       },
       ENTER_AMOUNT: {
         expecting: "amount",
-        describe:
-          "In the WITHDRAW flow. Waiting for the amount of USDT the user wants to cash out.",
-        rePrompt: "💰 Please enter the amount of *USDT* you want to withdraw:",
+        describe: `In the WITHDRAW flow. Waiting for the amount of ${d.withdraw.coin || "USDT"} the user wants to cash out.`,
+        rePrompt: `💰 Please enter the amount of *${d.withdraw.coin || "USDT"}* you want to withdraw:`,
       },
       ENTER_ACCOUNT_NUMBER: {
         expecting: "account_number",

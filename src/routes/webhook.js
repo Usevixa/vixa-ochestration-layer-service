@@ -48,7 +48,9 @@ import {
   executeWithdrawal,
   fetchSupportedCountries,
   fetchPaymentChannels,
+  getWithdrawalAssets,
 } from "../services/withdrawal.service.js";
+import { formatCryptoAmount } from "../utils/withdrawalAssets.js";
 import { confirmPayment } from "../services/confirmPayment.service.js";
 import {
   fetchSendQuote,
@@ -96,6 +98,7 @@ const BANK_SELECTION_FLOW_ID = process.env.BANK_SELECTION_FLOW_ID;
 const COUNTRY_SELECTION_FLOW_ID = process.env.COUNTRY_SELECTION_FLOW_ID;
 const ITEM_SELECTION_FLOW_ID = process.env.ITEM_SELECTION_FLOW_ID;
 const DEPOSIT_ASSET_FLOW_ID = process.env.DEPOSIT_ASSET_FLOW_ID;
+const WITHDRAW_ASSET_FLOW_ID = process.env.WITHDRAW_ASSET_FLOW_ID;
 const KYC_FLOW_ID = process.env.KYC_FLOW_ID;
 
 function formatDobToISO(dob) {
@@ -1042,7 +1045,7 @@ router.post("/callback", async (req, res) => {
                   },
                 });
 
-                await sendWithdrawTypeMenu(from, phone_number_id);
+                await startWithdrawAssetSelection(from, phone_number_id);
                 return;
               }
 
@@ -1821,7 +1824,7 @@ router.post("/callback", async (req, res) => {
                     },
                   },
                 });
-                await sendWithdrawTypeMenu(from, phone_number_id);
+                await startWithdrawAssetSelection(from, phone_number_id);
                 return;
               }
 
@@ -3626,7 +3629,17 @@ async function processFlowCompletion(phone, phone_number_id, form) {
       },
     });
 
-    await sendWithdrawTypeMenu(phone, phone_number_id);
+    await startWithdrawAssetSelection(phone, phone_number_id);
+    return;
+  }
+
+  if (flowToken.includes("::WITHDRAW_ASSET")) {
+    await handleWithdrawAssetSelection({
+      phone,
+      phone_number_id,
+      coin: form.coin,
+      network: form.network,
+    });
     return;
   }
 
@@ -4122,6 +4135,9 @@ router.post("/flow/callback", async (req, res) => {
           screen: "SELECT_COUNTRY",
           data: { countries: data.countries || [] },
         };
+      } else if (screen === "WITHDRAW_SELECT_COIN") {
+        // Withdraw asset Flow: the user picked a coin, show its networks.
+        responsePayload = await buildWithdrawNetworkScreen(data?.coin, flow_token);
       } else if (screen === "SELECT_COIN") {
         // Deposit asset Flow: the user picked a coin, load its chains.
         responsePayload = await buildDepositChainScreen(data?.coin, flow_token);
@@ -6419,6 +6435,223 @@ async function triggerDepositAssetFlow(toPhone, phone_number_id, coins) {
 }
 
 /**
+ * Flow data_exchange callbacks run outside any user context, and getToken()
+ * refuses to work there. Open the user's context, restore (or silently
+ * refresh) their token, then run fn.
+ */
+async function withFlowUserToken(phone, fn) {
+  return runWithUserContext(phone, async () => {
+    let session = await getSession(phone);
+    restoreCachedToken(session.data);
+
+    if (!isSessionTokenValid(session.data) && session.data?.refreshToken) {
+      const r = await refreshAccessToken({
+        phoneNumber: phone,
+        refreshToken: session.data.refreshToken,
+      });
+      if (r?.success) {
+        session = await getSession(phone);
+        restoreCachedToken(session.data);
+      }
+    }
+
+    return fn();
+  });
+}
+
+/**
+ * Coin + network picker for withdrawals, shown once the country and payout
+ * channel are known. Coins come from GET /withdrawal/assets. Falls back to
+ * the old USDT / other-coin menu when the Flow can't be used, so a
+ * withdrawal is never stuck.
+ */
+async function startWithdrawAssetSelection(to, phone_number_id) {
+  if (!WITHDRAW_ASSET_FLOW_ID) {
+    console.error("startWithdrawAssetSelection: WITHDRAW_ASSET_FLOW_ID is not set");
+    await sendWithdrawTypeMenu(to, phone_number_id);
+    return;
+  }
+
+  const res = await getWithdrawalAssets();
+  if (res.success && !res.assets.length) {
+    await sendWhatsApp(to, "⚠️ You have no balances to withdraw.", phone_number_id);
+    return;
+  }
+  if (!res.success) {
+    await sendWithdrawTypeMenu(to, phone_number_id);
+    return;
+  }
+
+  const session = await getSession(to);
+  await updateSession(to, {
+    data: {
+      ...session.data,
+      withdraw: {
+        ...session.data.withdraw,
+        coin: null,
+        network: null,
+        step: "SELECT_COIN",
+      },
+    },
+  });
+
+  const coins = res.assets.slice(0, 200).map((a) => ({
+    id: a.coin,
+    title: a.coin.substring(0, 30),
+    description: (
+      `Available: ${formatCryptoAmount(a.availableBalance)}` +
+      (a.needsConvert ? " · swapped to USDT" : "")
+    ).substring(0, 300),
+  }));
+
+  const sent = await triggerWithdrawAssetFlow(to, phone_number_id, coins);
+  if (!sent) await sendWithdrawTypeMenu(to, phone_number_id);
+}
+
+async function triggerWithdrawAssetFlow(toPhone, phone_number_id, coins) {
+  if (!WHATSAPP_TOKEN || !phone_number_id) {
+    console.log("[MOCK WITHDRAW ASSET FLOW] to:", toPhone);
+    return false;
+  }
+
+  const url = `https://graph.facebook.com/${WHATSAPP_API_VERSION}/${phone_number_id}/messages`;
+
+  const body = {
+    messaging_product: "whatsapp",
+    to: toPhone,
+    type: "interactive",
+    interactive: {
+      type: "flow",
+      body: { text: "💸 Choose the coin and network you want to withdraw" },
+      action: {
+        name: "flow",
+        parameters: {
+          flow_id: WITHDRAW_ASSET_FLOW_ID,
+          flow_token: `${toPhone}::WITHDRAW_ASSET`,
+          flow_cta: "Select Coin",
+          flow_message_version: "3",
+          flow_action: "navigate",
+          flow_action_payload: {
+            screen: "WITHDRAW_SELECT_COIN",
+            data: {
+              heading: "Which coin do you want to withdraw?",
+              coins,
+            },
+          },
+        },
+      },
+    },
+  };
+
+  const res = await fetch(url, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${WHATSAPP_TOKEN}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(body),
+  });
+
+  if (!res.ok) {
+    const debug = await res.text();
+    console.error("triggerWithdrawAssetFlow failed:", res.status, debug);
+    logger.error?.("flow send rejected", {
+      flow: "WITHDRAW_ASSET",
+      status: res.status,
+      debug,
+    });
+    return false;
+  }
+  console.log("triggerWithdrawAssetFlow sent to", toPhone);
+  return true;
+}
+
+/**
+ * data_exchange response for the withdraw Flow's "Next" tap: the
+ * WITHDRAW_SELECT_NETWORK screen for the chosen coin. On failure it stays
+ * on WITHDRAW_SELECT_COIN and WhatsApp shows `error_message` as a banner.
+ */
+async function buildWithdrawNetworkScreen(coin, flowToken) {
+  const stay = (error_message) => ({
+    screen: "WITHDRAW_SELECT_COIN",
+    data: { error_message },
+  });
+
+  if (!coin) return stay("Please select a coin.");
+
+  const phone = String(flowToken || "").split("::")[0];
+  if (!phone) return stay("Your session has expired. Please start the withdrawal again.");
+
+  const res = await withFlowUserToken(phone, () => getWithdrawalAssets());
+  const wanted = String(coin).toUpperCase();
+  const asset = res.assets.find((a) => a.coin.toUpperCase() === wanted);
+
+  if (!res.success || !asset) {
+    console.error(
+      "buildWithdrawNetworkScreen: no networks for",
+      coin,
+      res.error || "(coin not in response)",
+    );
+    return stay(`Couldn't load networks for ${coin}. Please try again.`);
+  }
+
+  const networks = asset.networks.slice(0, 200).map((n) => ({
+    id: n.network,
+    title: chainLabel(n.network).substring(0, 30),
+    description: `Available: ${formatCryptoAmount(n.available)} ${asset.coin}`.substring(0, 300),
+  }));
+
+  return {
+    screen: "WITHDRAW_SELECT_NETWORK",
+    data: {
+      coin: asset.coin,
+      heading: `Select the network to withdraw your ${asset.coin} from`,
+      notice: asset.needsConvert
+        ? `Your ${asset.coin} will be swapped to USDT before it's paid out.`
+        : "Only networks with a balance are shown.",
+      networks,
+    },
+  };
+}
+
+/** Withdraw asset Flow completed: store coin + network, then ask the amount. */
+async function handleWithdrawAssetSelection({ phone, phone_number_id, coin, network }) {
+  if (!coin) {
+    console.warn("Withdraw asset flow completed without coin:", { coin, network });
+    await sendWhatsApp(
+      phone,
+      "⚠️ I didn't get your coin. Let's try that again.",
+      phone_number_id,
+    );
+    await startWithdrawAssetSelection(phone, phone_number_id);
+    return;
+  }
+
+  const session = await getSession(phone);
+  await updateSession(phone, {
+    data: {
+      ...session.data,
+      phone_number_id,
+      withdraw: {
+        ...session.data.withdraw,
+        coin,
+        // Kept for display and for when the API takes a network. Quote and
+        // execute don't accept one today (the backend picks the chain).
+        network: network || null,
+        step: "ENTER_AMOUNT",
+      },
+    },
+  });
+
+  const on = network ? ` (${chainLabel(network)})` : "";
+  await sendWhatsApp(
+    phone,
+    `💰 Please enter the amount of *${coin}*${on} you want to withdraw:`,
+    phone_number_id,
+  );
+}
+
+/**
  * data_exchange response for the deposit asset Flow's "Next" tap: the
  * SELECT_CHAIN screen for the chosen coin. On failure it stays on
  * SELECT_COIN and WhatsApp shows `error_message` as a banner.
@@ -6437,23 +6670,7 @@ async function buildDepositChainScreen(coin, flowToken) {
   const phone = String(flowToken || "").split("::")[0];
   if (!phone) return stay("Your session has expired. Please start the deposit again.");
 
-  const res = await runWithUserContext(phone, async () => {
-    let session = await getSession(phone);
-    restoreCachedToken(session.data);
-
-    if (!isSessionTokenValid(session.data) && session.data?.refreshToken) {
-      const r = await refreshAccessToken({
-        phoneNumber: phone,
-        refreshToken: session.data.refreshToken,
-      });
-      if (r?.success) {
-        session = await getSession(phone);
-        restoreCachedToken(session.data);
-      }
-    }
-
-    return getDepositAssets({ coin });
-  });
+  const res = await withFlowUserToken(phone, () => getDepositAssets({ coin }));
   const wanted = String(coin).toUpperCase();
   const asset = res.assets.find((a) => a.coin.toUpperCase() === wanted);
 
