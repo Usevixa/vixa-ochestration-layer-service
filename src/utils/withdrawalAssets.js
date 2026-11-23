@@ -4,12 +4,16 @@
  *
  * Live response:
  *   { success, message: "Withdrawable assets", data: [{ coin, availableBalance,
- *     needsConvert, networks: [{ network, available }] }] }
+ *     needsConvert, networks: [{ network, available, needsConvert }] }] }
  *
  * Dust (e.g. ETH 1.14969219e-10) is dropped: a network is kept only when its
  * amount is still above 0 at 8 decimals, and a coin only when it has such a
- * network. needsConvert means the backend swaps the coin to USDT during the
- * withdrawal (the quote returns swapRate / usdtEquivalent).
+ * network.
+ *
+ * needsConvert is per network: true means the backend swaps that coin + chain
+ * to USDT on Solana before paying out (no custody wallet for it). Never a
+ * block, only a hint. The coin-level flag is true only when every network
+ * needs it.
  *
  * @param {*} body - the parsed response body (axios `res.data`)
  * @returns {Array|null} null when no list is found
@@ -28,6 +32,8 @@ export function normalizeWithdrawalAssets(body) {
       .map((n) => ({
         network: String(n?.network ?? "").trim(),
         available: Number(n?.available),
+        // Older responses only had the coin-level flag.
+        needsConvert: typeof n?.needsConvert === "boolean" ? n.needsConvert : item.needsConvert === true,
       }))
       .filter((n) => n.network && round8(n.available) > 0);
 
@@ -36,7 +42,8 @@ export function normalizeWithdrawalAssets(body) {
     out.push({
       coin,
       availableBalance: Number(item.availableBalance) || 0,
-      needsConvert: item.needsConvert === true,
+      needsConvert:
+        item.needsConvert === true || networks.every((n) => n.needsConvert),
       networks,
     });
   }

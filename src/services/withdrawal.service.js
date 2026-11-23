@@ -63,7 +63,8 @@ export async function executeWithdrawal(payload) {
   try {
     const token = await getToken();
 
-    console.log(payload,'execute payload')
+    // Never log the PIN.
+    console.log("execute payload", { ...payload, pin: payload?.pin ? "[redacted]" : payload?.pin });
     const res = await axios.post(`${VIXA_API_BASE}/withdrawal/execute`, payload, {
       httpsAgent,
       headers: { Authorization: `Bearer ${token}` },

@@ -51,6 +51,7 @@ import {
   getWithdrawalAssets,
 } from "../services/withdrawal.service.js";
 import { formatCryptoAmount } from "../utils/withdrawalAssets.js";
+import { buildWithdrawalQuoteText } from "../utils/withdrawalQuote.js";
 import { confirmPayment } from "../services/confirmPayment.service.js";
 import {
   fetchSendQuote,
@@ -759,6 +760,18 @@ router.post("/callback", async (req, res) => {
               const actionId = msg.interactive.list_reply.id;
 
               console.log("Menu selection:", actionId);
+
+              // Withdraw coin + network picked from the fallback list.
+              if (actionId.startsWith("WA|")) {
+                const [, coin, network] = actionId.split("|");
+                await handleWithdrawAssetSelection({
+                  phone: from,
+                  phone_number_id,
+                  coin,
+                  network,
+                });
+                return;
+              }
 
               // SWAP FROM pagination
               if (actionId.startsWith("SWAP_FROM_PAGE_")) {
@@ -1928,22 +1941,6 @@ router.post("/callback", async (req, res) => {
                 return;
               }
 
-              if (actionId.startsWith("WITHDRAW_SWAP_")) {
-                const coin = actionId.replace("WITHDRAW_SWAP_", "");
-                await startSwapFrom(
-                  from,
-                  phone_number_id,
-                  coin,
-                  session.data.withdraw?.withdrawableCoins || [],
-                );
-                return;
-              }
-
-              if (actionId === "WITHDRAW_PICK_COIN") {
-                await startWithdrawAssetSelection(from, phone_number_id);
-                return;
-              }
-
               if (actionId === "WITHDRAW_CANCEL") {
                 await updateSession(from, {
                   data: { ...session.data, withdraw: null },
@@ -2511,23 +2508,13 @@ router.post("/callback", async (req, res) => {
                 const fromCoin = session.data.swap.fromCoin;
                 // This site had no success check at all: a failed lookup left
                 // toCoins empty and shipped an item picker with zero rows.
-                let { coins: toCoins, error: toErr } =
+                const { coins: toCoins, error: toErr } =
                   await loadSwapCoins(fromCoin);
 
                 if (toErr) {
                   await sendWhatsApp(from, toErr, phone_number_id);
                   return;
                 }
-
-                // Swapping so they can withdraw: offer only withdrawable
-                // coins, unless none of them can be swapped into.
-                const allowed = (session.data.swap.toAllowed || []).map((c) =>
-                  String(c).toUpperCase(),
-                );
-                const limited = allowed.length
-                  ? toCoins.filter((c) => allowed.includes(String(c.coin).toUpperCase()))
-                  : [];
-                if (limited.length) toCoins = limited;
 
                 await updateSession(from, {
                   data: {
@@ -3009,73 +2996,14 @@ router.post("/callback", async (req, res) => {
                   return;
                 }
 
-                const { coin, channelId } = session.data.withdraw;
-
-                const quoteRes = await fetchWithdrawalQuote({
-                  coin,
-                  amount,
-                  channelId,
-                });
-
-                if (!quoteRes.success) {
-                  const rawError =
-                    quoteRes.error?.message || "Unknown server error";
-                  const friendly = await humanizeError(
-                    rawError,
-                    "get a withdrawal quote",
-                  );
-                  await sendWhatsApp(from, friendly, phone_number_id);
-                  await updateSession(from, {
-                    data: { ...session.data, withdraw: null },
-                  });
-                  await sendMainMenu(from, phone_number_id);
+                // Quote and execute need the network (chain). Older entry
+                // points picked only the coin, so send those back to the picker.
+                if (!session.data.withdraw?.network) {
+                  await startWithdrawAssetSelection(from, phone_number_id);
                   return;
                 }
 
-                const q = quoteRes.data;
-                const msgText = buildWithdrawalQuoteText(q);
-
-                await updateSession(from, {
-                  data: {
-                    ...session.data,
-                    withdraw: {
-                      ...session.data.withdraw,
-                      amount,
-                      // Execute needs both. The key is made once per quote so a
-                      // retried or double-tapped execute is the same withdrawal.
-                      quoteId: q.quoteId ?? null,
-                      idempotencyKey: `WITHDRAW-${randomUUID()}`,
-                      step: "AWAITING_QUOTE_CONFIRM",
-                    },
-                  },
-                });
-
-                await sendWhatsApp(
-                  from,
-                  {
-                    type: "interactive",
-                    interactive: {
-                      type: "button",
-                      body: { text: msgText },
-                      action: {
-                        buttons: [
-                          {
-                            type: "reply",
-                            reply: {
-                              id: "QUOTE_CONFIRM_YES",
-                              title: "Yes, Proceed",
-                            },
-                          },
-                          {
-                            type: "reply",
-                            reply: { id: "WITHDRAW_CANCEL", title: "Cancel" },
-                          },
-                        ],
-                      },
-                    },
-                  },
-                  phone_number_id,
-                );
+                await requestWithdrawalQuote(from, phone_number_id, amount);
                 return;
               }
 
@@ -4587,66 +4515,8 @@ async function handlePinFlowSubmission({
     // WITHDRAW QUOTE — PIN to generate quote
     // ─────────────────────────────────────────────
     case "WITHDRAW_QUOTE": {
-      const { coin, amount, channelId } = session.data.withdraw;
-
-      const quoteRes = await fetchWithdrawalQuote({
-        coin,
-        amount,
-        channelId,
-      });
-
-      if (!quoteRes.success) {
-        const rawError = quoteRes.error?.message || "Unknown server error";
-        const friendly = await humanizeError(
-          rawError,
-          "get a withdrawal quote",
-        );
-        await sendWhatsApp(phone, friendly, phone_number_id);
-        await updateSession(phone, {
-          data: { ...session.data, withdraw: null },
-        });
-        await sendMainMenu(phone, phone_number_id);
-        return;
-      }
-
-      const q = quoteRes.data;
-      const msgText = buildWithdrawalQuoteText(q);
-
-      await updateSession(phone, {
-        data: {
-          ...session.data,
-          withdraw: {
-            ...session.data.withdraw,
-            quoteId: q.quoteId ?? null,
-            idempotencyKey: `WITHDRAW-${randomUUID()}`,
-            step: "AWAITING_QUOTE_CONFIRM",
-          },
-        },
-      });
-
-      await sendWhatsApp(
-        phone,
-        {
-          type: "interactive",
-          interactive: {
-            type: "button",
-            body: { text: msgText },
-            action: {
-              buttons: [
-                {
-                  type: "reply",
-                  reply: { id: "QUOTE_CONFIRM_YES", title: "Yes, Proceed" },
-                },
-                {
-                  type: "reply",
-                  reply: { id: "WITHDRAW_CANCEL", title: "Cancel" },
-                },
-              ],
-            },
-          },
-        },
-        phone_number_id,
-      );
+      // Not triggered today (the quote needs no PIN); kept on the same path.
+      await requestWithdrawalQuote(phone, phone_number_id, session.data.withdraw?.amount);
       break;
     }
 
@@ -4656,6 +4526,7 @@ async function handlePinFlowSubmission({
     case "WITHDRAW_EXECUTE": {
       const {
         coin,
+        network,
         amount,
         accountNumber,
         accountName,
@@ -4668,6 +4539,9 @@ async function handlePinFlowSubmission({
 
       const execRes = await executeWithdrawal({
         coin,
+        // Must match the quote's chain, or the API answers 400 "…do not
+        // match this quote". networkId below is the bank, not this.
+        chain: network,
         amount,
         accountNumber,
         accountName,
@@ -4679,12 +4553,11 @@ async function handlePinFlowSubmission({
       });
 
       if (!execRes.success) {
-        const rawError = execRes.error?.message || "Unknown server error";
-        const friendly = await humanizeError(
-          rawError,
-          "execute a bank withdrawal",
+        await sendWhatsApp(
+          phone,
+          `⚠️ ${withdrawalErrorMessage(execRes.error)}`,
+          phone_number_id,
         );
-        await sendWhatsApp(phone, friendly, phone_number_id);
         await updateSession(phone, {
           data: { ...session.data, withdraw: null },
         });
@@ -5524,71 +5397,87 @@ function buildWithdrawalSubmittedText(r = {}, bank = {}) {
 }
 
 /**
- * Quote message for POST /withdrawal/quote. Response `data`:
- *   { quoteId, coin, network, totalDebit, vixaFee, networkFee, amountToBank,
- *     estimatedFiat, fiatCurrency, rate, expiresAt }
- * Any field that's missing drops its line instead of printing "undefined".
+ * The backend's own message for a failed withdrawal call. Its guide says to
+ * show `message` as is, so no AI rewording here.
  */
-function buildWithdrawalQuoteText(q = {}) {
-  const has = (v) => v !== undefined && v !== null && v !== "";
-  const coin = q.coin || "";
-  const fiat = q.fiatCurrency || "";
-  const money = (v) =>
-    Number(v).toLocaleString("en-NG", { maximumFractionDigits: 2 });
-  const fiatAmount = (v) =>
-    fiat === "NGN" ? `₦${money(v)}` : `${money(v)} ${fiat}`.trim();
-
-  const lines = [];
-  if (has(q.totalDebit)) lines.push(`Withdrawing: ${q.totalDebit} ${coin}`.trim());
-
-  const fees = [q.vixaFee, q.networkFee].filter(has).map(Number);
-  if (fees.length) {
-    // toFixed(8) trims float noise (0.016 + 0.025564 = 0.041564000000000005).
-    const totalFees = Number(fees.reduce((a, b) => a + b, 0).toFixed(8));
-    lines.push(`Fees: ${totalFees} ${coin}`.trim());
-  }
-
-  if (has(q.estimatedFiat))
-    lines.push(`You'll receive: ≈ ${money(q.estimatedFiat)} ${fiat}`.trim());
-  if (has(q.rate) && coin) lines.push(`Rate: 1 ${coin} = ${fiatAmount(q.rate)}`);
-
-  if (has(q.expiresAt)) {
-    const expiry = new Date(q.expiresAt);
-    if (!isNaN(expiry)) {
-      lines.push(
-        `Expires: ${expiry.toLocaleTimeString("en-NG", {
-          hour: "2-digit",
-          minute: "2-digit",
-          hour12: true,
-          timeZone: "Africa/Lagos",
-        })}`,
-      );
-    }
-  }
-
-  if (!lines.length) lines.push("Your quote is ready.");
-
-  return `📊 *Withdrawal Quote*\n\n${lines.join("\n")}\n\nDo you want to proceed?`;
+function withdrawalErrorMessage(error) {
+  // A string is a transport error (timeout, ECONNREFUSED): not for users.
+  const m = error && typeof error === "object" ? error.message : null;
+  return m && String(m).trim()
+    ? String(m).trim()
+    : "Something went wrong with your withdrawal. Please try again.";
 }
 
-async function sendWithdrawTypeMenu(to, phone_number_id) {
+/**
+ * POST /withdrawal/quote for the coin + chain in the session and show it.
+ *   ok                       → quote + [Yes, Proceed] [Cancel]
+ *   400 hasEnoughBalance:false → quote with the shortfall, ask a new amount
+ *   any other error          → the backend's message, back to the menu
+ */
+async function requestWithdrawalQuote(to, phone_number_id, amount) {
+  const session = await getSession(to);
+  const w = session.data.withdraw || {};
+
+  const quoteRes = await fetchWithdrawalQuote({
+    coin: w.coin,
+    chain: w.network,
+    amount,
+    channelId: w.channelId,
+  });
+
+  if (!quoteRes.success) {
+    const err = quoteRes.error;
+    const short = err && typeof err === "object" ? err.data : null;
+
+    // Short on that chain: data still holds the full quote.
+    if (short && short.hasEnoughBalance === false) {
+      await updateSession(to, {
+        data: { ...session.data, withdraw: { ...w, step: "ENTER_AMOUNT" } },
+      });
+      await sendWhatsApp(
+        to,
+        buildWithdrawalQuoteText(short, { network: w.network, ask: false }) +
+          "\n\nPlease enter a smaller amount, or type *cancel*.",
+        phone_number_id,
+      );
+      return;
+    }
+
+    await sendWhatsApp(to, `⚠️ ${withdrawalErrorMessage(err)}`, phone_number_id);
+    await updateSession(to, { data: { ...session.data, withdraw: null } });
+    await sendMainMenu(to, phone_number_id);
+    return;
+  }
+
+  const q = quoteRes.data || {};
+  await updateSession(to, {
+    data: {
+      ...session.data,
+      withdraw: {
+        ...w,
+        amount,
+        // The quote's canonical chain, so execute sends exactly what was quoted.
+        network: q.chain || w.network,
+        // Execute needs both. The key is made once per quote so a retried or
+        // double-tapped execute is the same withdrawal.
+        quoteId: q.quoteId ?? null,
+        idempotencyKey: `WITHDRAW-${randomUUID()}`,
+        step: "AWAITING_QUOTE_CONFIRM",
+      },
+    },
+  });
+
   await sendWhatsApp(
     to,
     {
       type: "interactive",
       interactive: {
-        type: "list",
-        body: { text: "How would you like to withdraw?" },
+        type: "button",
+        body: { text: buildWithdrawalQuoteText(q, { network: w.network }) },
         action: {
-          button: "Select Option",
-          sections: [
-            {
-              title: "Withdrawal Options",
-              rows: [
-                { id: "WITHDRAW_TYPE_USDT", title: "Withdraw in USDT" },
-                { id: "WITHDRAW_TYPE_OTHER", title: "Withdraw other coin" },
-              ],
-            },
+          buttons: [
+            { type: "reply", reply: { id: "QUOTE_CONFIRM_YES", title: "Yes, Proceed" } },
+            { type: "reply", reply: { id: "WITHDRAW_CANCEL", title: "Cancel" } },
           ],
         },
       },
@@ -6486,113 +6375,24 @@ async function withFlowUserToken(phone, fn) {
 }
 
 /**
- * The picked coin has needsConvert: true, so it can't be withdrawn as it
- * is. Offer to swap it into a withdrawable coin, or pick another coin.
- */
-async function offerSwapBeforeWithdraw(phone, phone_number_id, coin) {
-  const session = await getSession(phone);
-  await updateSession(phone, {
-    data: {
-      ...session.data,
-      withdraw: { ...session.data.withdraw, coin: null, network: null, step: "AWAITING_SWAP_CHOICE" },
-    },
-  });
-
-  await sendWhatsApp(
-    phone,
-    {
-      type: "interactive",
-      interactive: {
-        type: "button",
-        body: {
-          text:
-            `🔁 *${coin}* can't be withdrawn directly.\n\n` +
-            "Swap it to a coin you can withdraw first, then withdraw.",
-        },
-        action: {
-          buttons: [
-            {
-              type: "reply",
-              reply: { id: `WITHDRAW_SWAP_${coin}`, title: `🔁 Swap ${coin}`.substring(0, 20) },
-            },
-            {
-              type: "reply",
-              reply: { id: "WITHDRAW_PICK_COIN", title: "Pick another coin" },
-            },
-          ],
-        },
-      },
-    },
-    phone_number_id,
-  );
-}
-
-/**
- * Open the swap flow with the from-coin already chosen, straight at the
- * amount. toAllowed (the withdrawable coins) limits the "to" list; when it's
- * empty or matches nothing, the user picks from every swap coin.
- */
-async function startSwapFrom(to, phone_number_id, fromCoin, toAllowed = []) {
-  const { coins, error } = await loadSwapCoins();
-  if (error) {
-    await sendWhatsApp(to, error, phone_number_id);
-    return;
-  }
-
-  const wanted = String(fromCoin).toUpperCase();
-  const selected = coins.find((c) => String(c.coin).toUpperCase() === wanted);
-  if (!selected) {
-    await sendWhatsApp(
-      to,
-      `⚠️ ${fromCoin} can't be swapped right now. Please try again later.`,
-      phone_number_id,
-    );
-    await sendMainMenu(to, phone_number_id);
-    return;
-  }
-
-  const session = await getSession(to);
-  await updateSession(to, {
-    data: {
-      ...session.data,
-      withdraw: null,
-      swap: {
-        step: "ENTER_AMOUNT",
-        allCoins: coins,
-        fromCoin: selected.coin,
-        fromCoinLimits: selected,
-        toAllowed: toAllowed.length ? toAllowed : null,
-      },
-    },
-  });
-
-  await sendWhatsApp(
-    to,
-    `💰 Enter amount of *${selected.coin}* to swap`,
-    phone_number_id,
-  );
-}
-
-/**
  * Coin + network picker for withdrawals, shown once the country and payout
  * channel are known. Coins come from GET /withdrawal/assets. Falls back to
  * the old USDT / other-coin menu when the Flow can't be used, so a
  * withdrawal is never stuck.
  */
 async function startWithdrawAssetSelection(to, phone_number_id) {
-  if (!WITHDRAW_ASSET_FLOW_ID) {
-    console.error("startWithdrawAssetSelection: WITHDRAW_ASSET_FLOW_ID is not set");
-    await sendWithdrawTypeMenu(to, phone_number_id);
-    return;
-  }
-
   const res = await getWithdrawalAssets();
   if (res.success && !res.assets.length) {
     await sendWhatsApp(to, "⚠️ You have no balances to withdraw.", phone_number_id);
     return;
   }
   if (!res.success) {
-    await sendWithdrawTypeMenu(to, phone_number_id);
+    // Every withdrawal now needs a coin + chain, and this is the only source.
+    await sendWhatsApp(
+      to,
+      "⚠️ Unable to load your withdrawal options right now. Please try again shortly.",
+      phone_number_id,
+    );
     return;
   }
 
@@ -6605,10 +6405,6 @@ async function startWithdrawAssetSelection(to, phone_number_id) {
         coin: null,
         network: null,
         step: "SELECT_COIN",
-        // needsConvert coins can't be withdrawn as they are: picking one
-        // offers a swap into one of the withdrawable coins instead.
-        convertCoins: res.assets.filter((a) => a.needsConvert).map((a) => a.coin),
-        withdrawableCoins: res.assets.filter((a) => !a.needsConvert).map((a) => a.coin),
       },
     },
   });
@@ -6618,12 +6414,51 @@ async function startWithdrawAssetSelection(to, phone_number_id) {
     title: a.coin.substring(0, 30),
     description: (
       `Available: ${formatCryptoAmount(a.availableBalance)}` +
-      (a.needsConvert ? " · ⚠️ Swap needed first" : "")
+      (a.needsConvert ? " · swapped to USDT" : "")
     ).substring(0, 300),
   }));
 
-  const sent = await triggerWithdrawAssetFlow(to, phone_number_id, coins);
-  if (!sent) await sendWithdrawTypeMenu(to, phone_number_id);
+  if (!WITHDRAW_ASSET_FLOW_ID) {
+    console.error("startWithdrawAssetSelection: WITHDRAW_ASSET_FLOW_ID is not set");
+  }
+  const sent =
+    WITHDRAW_ASSET_FLOW_ID && (await triggerWithdrawAssetFlow(to, phone_number_id, coins));
+  if (!sent) await sendWithdrawAssetList(to, phone_number_id, res.assets);
+}
+
+/**
+ * Fallback when the Flow can't be used: one list row per coin + network
+ * (WhatsApp lists hold 10 rows). Row id: WA|<coin>|<network>.
+ */
+async function sendWithdrawAssetList(to, phone_number_id, assets) {
+  const rows = assets
+    .flatMap((a) =>
+      a.networks.map((n) => ({
+        id: `WA|${a.coin}|${n.network}`.substring(0, 200),
+        title: `${a.coin} · ${chainLabel(n.network)}`.substring(0, 24),
+        description: (
+          `Available: ${formatCryptoAmount(n.available)} ${a.coin}` +
+          (n.needsConvert ? " · swapped to USDT" : "")
+        ).substring(0, 72),
+      })),
+    )
+    .slice(0, 10);
+
+  await sendWhatsApp(
+    to,
+    {
+      type: "interactive",
+      interactive: {
+        type: "list",
+        body: { text: "💸 Choose the coin and network you want to withdraw" },
+        action: {
+          button: "Select",
+          sections: [{ title: "Withdraw from", rows }],
+        },
+      },
+    },
+    phone_number_id,
+  );
 }
 
 async function triggerWithdrawAssetFlow(toPhone, phone_number_id, coins) {
@@ -6716,7 +6551,10 @@ async function buildWithdrawNetworkScreen(coin, flowToken) {
   const networks = asset.networks.slice(0, 200).map((n) => ({
     id: n.network,
     title: chainLabel(n.network).substring(0, 30),
-    description: `Available: ${formatCryptoAmount(n.available)} ${asset.coin}`.substring(0, 300),
+    description: (
+      `Available: ${formatCryptoAmount(n.available)} ${asset.coin}` +
+      (n.needsConvert ? " · swapped to USDT" : "")
+    ).substring(0, 300),
   }));
 
   return {
@@ -6724,8 +6562,9 @@ async function buildWithdrawNetworkScreen(coin, flowToken) {
     data: {
       coin: asset.coin,
       heading: `Select the network to withdraw your ${asset.coin} from`,
-      notice: asset.needsConvert
-        ? `${asset.coin} can't be withdrawn directly. Tap Continue and we'll help you swap it first.`
+      // A hint, never a block: the backend swaps these to USDT itself.
+      notice: asset.networks.some((n) => n.needsConvert)
+        ? "Networks marked \"swapped to USDT\" are converted to USDT before they're paid out."
         : "Only networks with a balance are shown.",
       networks,
     },
@@ -6746,13 +6585,6 @@ async function handleWithdrawAssetSelection({ phone, phone_number_id, coin, netw
   }
 
   const session = await getSession(phone);
-  const sameCoin = (c) => String(c).toUpperCase() === String(coin).toUpperCase();
-
-  if ((session.data.withdraw?.convertCoins || []).some(sameCoin)) {
-    await offerSwapBeforeWithdraw(phone, phone_number_id, coin);
-    return;
-  }
-
   await updateSession(phone, {
     data: {
       ...session.data,

@@ -61,6 +61,10 @@ function message(text) {
     const id = text.slice(4);
     return { ...base, type: "interactive", interactive: { type: "button_reply", button_reply: { id, title: id } } };
   }
+  if (text.startsWith("list:")) {
+    const id = text.slice(5);
+    return { ...base, type: "interactive", interactive: { type: "list_reply", list_reply: { id, title: id } } };
+  }
   if (text.startsWith("nfm:")) {
     return { ...base, type: "interactive", interactive: { type: "nfm_reply", nfm_reply: { response_json: text.slice(4) } } };
   }
@@ -163,23 +167,23 @@ const cases = [
   ["Balance, API down", "check my balance", { ...BLANK }, /./],
   ["Receive, API down", "give me my wallet address", { ...BLANK }, /./],
   ["Gibberish at the menu", "asdkjhasd", { ...BLANK }, /./],
-  // Withdraw coin + network Flow (needsConvert).
-  ["Withdraw: needsConvert coin offers a swap",
+  // Withdraw coin + network Flow. needsConvert is a hint, never a block.
+  ["Withdraw: needsConvert coin still asks the amount",
     `nfm:${JSON.stringify({ flow_token: `${RAW_PHONE}::WITHDRAW_ASSET`, coin: "SOL", network: "solana" })}`,
-    { ...BLANK, withdraw: { step: "SELECT_COIN", channelId: "c1", convertCoins: ["SOL"], withdrawableCoins: ["USDT"] } },
-    /SOL\* can't be withdrawn directly/i],
-  ["Withdraw: withdrawable coin asks the amount",
-    `nfm:${JSON.stringify({ flow_token: `${RAW_PHONE}::WITHDRAW_ASSET`, coin: "USDT", network: "solana" })}`,
-    { ...BLANK, withdraw: { step: "SELECT_COIN", channelId: "c1", convertCoins: ["SOL"], withdrawableCoins: ["USDT"] } },
-    /amount of \*USDT\* \(Solana \(SPL\)\)/i],
-  ["Withdraw: Pick another coin, API down → old menu",
-    "btn:WITHDRAW_PICK_COIN",
-    { ...BLANK, withdraw: { step: "AWAITING_SWAP_CHOICE", channelId: "c1" } },
-    /how would you like to withdraw|withdraw asset flow sent/i],
-  ["Withdraw: Swap SOL, API down → says so",
-    "btn:WITHDRAW_SWAP_SOL",
-    { ...BLANK, withdraw: { step: "AWAITING_SWAP_CHOICE", withdrawableCoins: ["USDT"] } },
-    /swap currencies|swap isn't available|can't be swapped/i],
+    { ...BLANK, withdraw: { step: "SELECT_COIN", channelId: "c1" } },
+    /amount of \*SOL\* \(Solana \(SPL\)\)/i],
+  ["Withdraw: fallback list row asks the amount",
+    "list:WA|USDT|polygon",
+    { ...BLANK, withdraw: { step: "SELECT_COIN", channelId: "c1" } },
+    /amount of \*USDT\* \(Polygon \(POS\)\)/i],
+  ["Withdraw: amount without a network reopens the picker",
+    "50",
+    { ...BLANK, withdraw: { step: "ENTER_AMOUNT", coin: "USDT", channelId: "c1" } },
+    /withdrawal options|withdraw asset flow sent|choose the coin and network/i],
+  ["Withdraw: quote fails, no raw transport error",
+    "50",
+    { ...BLANK, withdraw: { step: "ENTER_AMOUNT", coin: "USDT", network: "solana", channelId: "c1" } },
+    /^(?!.*ECONNREFUSED).*something went wrong with your withdrawal/is],
 ];
 
 let thrown = 0;
