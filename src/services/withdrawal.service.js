@@ -2,6 +2,8 @@
 import axios from "axios";
 import { getToken } from "./auth.service.js";
 import https from "https";
+import logger from "../lib/logger.js";
+import { normalizeWithdrawalAssets } from "../utils/withdrawalAssets.js";
 
 const httpsAgent = new https.Agent({
   keepAlive: true,
@@ -61,7 +63,8 @@ export async function executeWithdrawal(payload) {
   try {
     const token = await getToken();
 
-    console.log(payload,'execute payload')
+    // Never log the PIN.
+    console.log("execute payload", { ...payload, pin: payload?.pin ? "[redacted]" : payload?.pin });
     const res = await axios.post(`${VIXA_API_BASE}/withdrawal/execute`, payload, {
       httpsAgent,
       headers: { Authorization: `Bearer ${token}` },
@@ -102,3 +105,37 @@ export async function fetchPaymentChannels(countryCode, ramp) {
   }
 }
 
+
+/**
+ * GET /withdrawal/assets — coins the user can withdraw, each with the
+ * networks holding a balance. Dust is dropped (see normalizeWithdrawalAssets).
+ * @returns {{ success: boolean, assets: Array, error?: any }}
+ */
+export async function getWithdrawalAssets() {
+  try {
+    const token = getToken();
+    const res = await axios.get(`${VIXA_API_BASE}/withdrawal/assets`, {
+      httpsAgent,
+      timeout: 8000,
+      headers: {
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        Accept: "text/plain",
+      },
+    });
+
+    const assets = normalizeWithdrawalAssets(res.data);
+    if (!assets) {
+      const body = JSON.stringify(res.data)?.slice(0, 400);
+      console.error("getWithdrawalAssets: no asset list. Body:", body);
+      logger.error?.("withdrawal assets: no list", { status: res.status, body });
+      return { success: false, assets: [], error: res.data?.message || "No asset list" };
+    }
+    return { success: true, assets };
+  } catch (err) {
+    const status = err?.response?.status ?? null;
+    const body = JSON.stringify(err?.response?.data ?? err?.message)?.slice(0, 400);
+    console.error("getWithdrawalAssets ERROR:", status, body);
+    logger.error?.("withdrawal assets: request failed", { status, body });
+    return { success: false, assets: [], error: err?.response?.data || err?.message };
+  }
+}

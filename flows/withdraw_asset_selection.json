@@ -1,0 +1,139 @@
+{
+  "version": "7.3",
+  "data_api_version": "3.0",
+  "routing_model": {
+    "WITHDRAW_SELECT_COIN": ["WITHDRAW_SELECT_NETWORK"],
+    "WITHDRAW_SELECT_NETWORK": []
+  },
+  "screens": [
+    {
+      "id": "WITHDRAW_SELECT_COIN",
+      "title": "Withdraw",
+      "data": {
+        "heading": {
+          "type": "string",
+          "__example__": "Which coin do you want to withdraw?"
+        },
+        "coins": {
+          "type": "array",
+          "__example__": [
+            { "id": "USDT", "title": "USDT", "description": "Available: 120.50" },
+            { "id": "USDC", "title": "USDC", "description": "Available: 40" },
+            { "id": "BTC", "title": "BTC", "description": "Available: 0.0021" }
+          ],
+          "items": {
+            "type": "object",
+            "properties": {
+              "id": { "type": "string" },
+              "title": { "type": "string" },
+              "description": { "type": "string" }
+            }
+          }
+        }
+      },
+      "layout": {
+        "type": "SingleColumnLayout",
+        "children": [
+          {
+            "type": "Form",
+            "name": "withdraw_coin_form",
+            "children": [
+              {
+                "type": "TextSubheading",
+                "text": "${data.heading}"
+              },
+              {
+                "type": "Dropdown",
+                "name": "selected_coin",
+                "label": "Coin",
+                "required": true,
+                "data-source": "${data.coins}"
+              },
+              {
+                "type": "Footer",
+                "label": "Next",
+                "on-click-action": {
+                  "name": "data_exchange",
+                  "payload": {
+                    "coin": "${form.selected_coin}"
+                  }
+                }
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "WITHDRAW_SELECT_NETWORK",
+      "title": "Select Network",
+      "terminal": true,
+      "data": {
+        "coin": {
+          "type": "string",
+          "__example__": "USDT"
+        },
+        "heading": {
+          "type": "string",
+          "__example__": "Select the network to withdraw your USDT from"
+        },
+        "notice": {
+          "type": "string",
+          "__example__": "Only networks with a balance are shown."
+        },
+        "networks": {
+          "type": "array",
+          "__example__": [
+            { "id": "TRON", "title": "TRON (TRC20)", "description": "Available: 100.50" },
+            { "id": "SOLANA", "title": "Solana (SPL)", "description": "Available: 20" }
+          ],
+          "items": {
+            "type": "object",
+            "properties": {
+              "id": { "type": "string" },
+              "title": { "type": "string" },
+              "description": { "type": "string" }
+            }
+          }
+        }
+      },
+      "layout": {
+        "type": "SingleColumnLayout",
+        "children": [
+          {
+            "type": "Form",
+            "name": "withdraw_network_form",
+            "children": [
+              {
+                "type": "TextSubheading",
+                "text": "${data.heading}"
+              },
+              {
+                "type": "Dropdown",
+                "name": "selected_network",
+                "label": "Network",
+                "required": true,
+                "data-source": "${data.networks}"
+              },
+              {
+                "type": "TextCaption",
+                "text": "${data.notice}"
+              },
+              {
+                "type": "Footer",
+                "label": "Continue",
+                "on-click-action": {
+                  "name": "complete",
+                  "payload": {
+                    "coin": "${data.coin}",
+                    "network": "${form.selected_network}"
+                  }
+                }
+              }
+            ]
+          }
+        ]
+      }
+    }
+  ]
+}
