@@ -239,6 +239,12 @@ export function describeFlowState(sessionData) {
         describe: "In the WITHDRAW flow. Waiting for a coin selection.",
         rePrompt: "Please tap above and pick the coin you want to withdraw.",
       },
+      AWAITING_SWAP_CHOICE: {
+        expecting: "selection",
+        describe:
+          "In the WITHDRAW flow. The picked coin can't be withdrawn directly; waiting for the user to tap Swap or Pick another coin.",
+        rePrompt: "Please tap *Swap* above to swap it first, or *Pick another coin*.",
+      },
       SELECT_BANK: {
         expecting: "selection",
         describe: "In the WITHDRAW flow. Waiting for a bank selection.",

@@ -1928,6 +1928,22 @@ router.post("/callback", async (req, res) => {
                 return;
               }
 
+              if (actionId.startsWith("WITHDRAW_SWAP_")) {
+                const coin = actionId.replace("WITHDRAW_SWAP_", "");
+                await startSwapFrom(
+                  from,
+                  phone_number_id,
+                  coin,
+                  session.data.withdraw?.withdrawableCoins || [],
+                );
+                return;
+              }
+
+              if (actionId === "WITHDRAW_PICK_COIN") {
+                await startWithdrawAssetSelection(from, phone_number_id);
+                return;
+              }
+
               if (actionId === "WITHDRAW_CANCEL") {
                 await updateSession(from, {
                   data: { ...session.data, withdraw: null },
@@ -2495,13 +2511,23 @@ router.post("/callback", async (req, res) => {
                 const fromCoin = session.data.swap.fromCoin;
                 // This site had no success check at all: a failed lookup left
                 // toCoins empty and shipped an item picker with zero rows.
-                const { coins: toCoins, error: toErr } =
+                let { coins: toCoins, error: toErr } =
                   await loadSwapCoins(fromCoin);
 
                 if (toErr) {
                   await sendWhatsApp(from, toErr, phone_number_id);
                   return;
                 }
+
+                // Swapping so they can withdraw: offer only withdrawable
+                // coins, unless none of them can be swapped into.
+                const allowed = (session.data.swap.toAllowed || []).map((c) =>
+                  String(c).toUpperCase(),
+                );
+                const limited = allowed.length
+                  ? toCoins.filter((c) => allowed.includes(String(c.coin).toUpperCase()))
+                  : [];
+                if (limited.length) toCoins = limited;
 
                 await updateSession(from, {
                   data: {
@@ -6460,6 +6486,94 @@ async function withFlowUserToken(phone, fn) {
 }
 
 /**
+ * The picked coin has needsConvert: true, so it can't be withdrawn as it
+ * is. Offer to swap it into a withdrawable coin, or pick another coin.
+ */
+async function offerSwapBeforeWithdraw(phone, phone_number_id, coin) {
+  const session = await getSession(phone);
+  await updateSession(phone, {
+    data: {
+      ...session.data,
+      withdraw: { ...session.data.withdraw, coin: null, network: null, step: "AWAITING_SWAP_CHOICE" },
+    },
+  });
+
+  await sendWhatsApp(
+    phone,
+    {
+      type: "interactive",
+      interactive: {
+        type: "button",
+        body: {
+          text:
+            `🔁 *${coin}* can't be withdrawn directly.\n\n` +
+            "Swap it to a coin you can withdraw first, then withdraw.",
+        },
+        action: {
+          buttons: [
+            {
+              type: "reply",
+              reply: { id: `WITHDRAW_SWAP_${coin}`, title: `🔁 Swap ${coin}`.substring(0, 20) },
+            },
+            {
+              type: "reply",
+              reply: { id: "WITHDRAW_PICK_COIN", title: "Pick another coin" },
+            },
+          ],
+        },
+      },
+    },
+    phone_number_id,
+  );
+}
+
+/**
+ * Open the swap flow with the from-coin already chosen, straight at the
+ * amount. toAllowed (the withdrawable coins) limits the "to" list; when it's
+ * empty or matches nothing, the user picks from every swap coin.
+ */
+async function startSwapFrom(to, phone_number_id, fromCoin, toAllowed = []) {
+  const { coins, error } = await loadSwapCoins();
+  if (error) {
+    await sendWhatsApp(to, error, phone_number_id);
+    return;
+  }
+
+  const wanted = String(fromCoin).toUpperCase();
+  const selected = coins.find((c) => String(c.coin).toUpperCase() === wanted);
+  if (!selected) {
+    await sendWhatsApp(
+      to,
+      `⚠️ ${fromCoin} can't be swapped right now. Please try again later.`,
+      phone_number_id,
+    );
+    await sendMainMenu(to, phone_number_id);
+    return;
+  }
+
+  const session = await getSession(to);
+  await updateSession(to, {
+    data: {
+      ...session.data,
+      withdraw: null,
+      swap: {
+        step: "ENTER_AMOUNT",
+        allCoins: coins,
+        fromCoin: selected.coin,
+        fromCoinLimits: selected,
+        toAllowed: toAllowed.length ? toAllowed : null,
+      },
+    },
+  });
+
+  await sendWhatsApp(
+    to,
+    `💰 Enter amount of *${selected.coin}* to swap`,
+    phone_number_id,
+  );
+}
+
+/**
  * Coin + network picker for withdrawals, shown once the country and payout
  * channel are known. Coins come from GET /withdrawal/assets. Falls back to
  * the old USDT / other-coin menu when the Flow can't be used, so a
@@ -6491,6 +6605,10 @@ async function startWithdrawAssetSelection(to, phone_number_id) {
         coin: null,
         network: null,
         step: "SELECT_COIN",
+        // needsConvert coins can't be withdrawn as they are: picking one
+        // offers a swap into one of the withdrawable coins instead.
+        convertCoins: res.assets.filter((a) => a.needsConvert).map((a) => a.coin),
+        withdrawableCoins: res.assets.filter((a) => !a.needsConvert).map((a) => a.coin),
       },
     },
   });
@@ -6500,7 +6618,7 @@ async function startWithdrawAssetSelection(to, phone_number_id) {
     title: a.coin.substring(0, 30),
     description: (
       `Available: ${formatCryptoAmount(a.availableBalance)}` +
-      (a.needsConvert ? " · swapped to USDT" : "")
+      (a.needsConvert ? " · ⚠️ Swap needed first" : "")
     ).substring(0, 300),
   }));
 
@@ -6607,7 +6725,7 @@ async function buildWithdrawNetworkScreen(coin, flowToken) {
       coin: asset.coin,
       heading: `Select the network to withdraw your ${asset.coin} from`,
       notice: asset.needsConvert
-        ? `Your ${asset.coin} will be swapped to USDT before it's paid out.`
+        ? `${asset.coin} can't be withdrawn directly. Tap Continue and we'll help you swap it first.`
         : "Only networks with a balance are shown.",
       networks,
     },
@@ -6628,6 +6746,13 @@ async function handleWithdrawAssetSelection({ phone, phone_number_id, coin, netw
   }
 
   const session = await getSession(phone);
+  const sameCoin = (c) => String(c).toUpperCase() === String(coin).toUpperCase();
+
+  if ((session.data.withdraw?.convertCoins || []).some(sameCoin)) {
+    await offerSwapBeforeWithdraw(phone, phone_number_id, coin);
+    return;
+  }
+
   await updateSession(phone, {
     data: {
       ...session.data,

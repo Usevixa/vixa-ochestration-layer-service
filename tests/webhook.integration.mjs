@@ -33,6 +33,7 @@ console.log = (...a) => {
   if (s.startsWith("[MOCK send]")) sent.push(a[2]);
   if (s.startsWith("[MOCK ITEM FLOW]")) sent.push("<item-selection flow sent>");
   if (s.startsWith("[MOCK DEPOSIT ASSET FLOW]")) sent.push("<deposit asset flow sent>");
+  if (s.startsWith("[MOCK WITHDRAW ASSET FLOW]")) sent.push("<withdraw asset flow sent>");
   if (s.startsWith("[MOCK PIN FLOW]")) sent.push("<PIN flow sent: " + s.split("context:")[1]?.trim() + ">");
   if (s.startsWith("[MOCK FLOW]")) sent.push("<onboarding flow sent>");
 };
@@ -53,6 +54,19 @@ const port = server.address().port;
 const RAW_PHONE = "2348000000001";
 const KEY = "+2348000000001"; // normalizePhone() prefixes with '+'
 
+// "btn:ID" sends a button tap, "nfm:{json}" a Flow completion, else text.
+function message(text) {
+  const base = { from: RAW_PHONE, id: "wamid." + Math.random() };
+  if (text.startsWith("btn:")) {
+    const id = text.slice(4);
+    return { ...base, type: "interactive", interactive: { type: "button_reply", button_reply: { id, title: id } } };
+  }
+  if (text.startsWith("nfm:")) {
+    return { ...base, type: "interactive", interactive: { type: "nfm_reply", nfm_reply: { response_json: text.slice(4) } } };
+  }
+  return { ...base, type: "text", text: { body: text } };
+}
+
 function payload(text) {
   return {
     entry: [
@@ -62,12 +76,7 @@ function payload(text) {
             value: {
               metadata: { phone_number_id: "TEST_PNID" },
               messages: [
-                {
-                  from: RAW_PHONE,
-                  id: "wamid." + Math.random(),
-                  type: "text",
-                  text: { body: text },
-                },
+                message(text),
               ],
             },
           },
@@ -154,6 +163,23 @@ const cases = [
   ["Balance, API down", "check my balance", { ...BLANK }, /./],
   ["Receive, API down", "give me my wallet address", { ...BLANK }, /./],
   ["Gibberish at the menu", "asdkjhasd", { ...BLANK }, /./],
+  // Withdraw coin + network Flow (needsConvert).
+  ["Withdraw: needsConvert coin offers a swap",
+    `nfm:${JSON.stringify({ flow_token: `${RAW_PHONE}::WITHDRAW_ASSET`, coin: "SOL", network: "solana" })}`,
+    { ...BLANK, withdraw: { step: "SELECT_COIN", channelId: "c1", convertCoins: ["SOL"], withdrawableCoins: ["USDT"] } },
+    /SOL\* can't be withdrawn directly/i],
+  ["Withdraw: withdrawable coin asks the amount",
+    `nfm:${JSON.stringify({ flow_token: `${RAW_PHONE}::WITHDRAW_ASSET`, coin: "USDT", network: "solana" })}`,
+    { ...BLANK, withdraw: { step: "SELECT_COIN", channelId: "c1", convertCoins: ["SOL"], withdrawableCoins: ["USDT"] } },
+    /amount of \*USDT\* \(Solana \(SPL\)\)/i],
+  ["Withdraw: Pick another coin, API down → old menu",
+    "btn:WITHDRAW_PICK_COIN",
+    { ...BLANK, withdraw: { step: "AWAITING_SWAP_CHOICE", channelId: "c1" } },
+    /how would you like to withdraw|withdraw asset flow sent/i],
+  ["Withdraw: Swap SOL, API down → says so",
+    "btn:WITHDRAW_SWAP_SOL",
+    { ...BLANK, withdraw: { step: "AWAITING_SWAP_CHOICE", withdrawableCoins: ["USDT"] } },
+    /swap currencies|swap isn't available|can't be swapped/i],
 ];
 
 let thrown = 0;
