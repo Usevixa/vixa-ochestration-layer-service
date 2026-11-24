@@ -78,6 +78,7 @@ import {
 import { transcribeAudio } from "../services/transcription.service.js";
 import { normalizeSpokenText } from "../utils/spokenNumbers.js";
 import { chainLabel } from "../utils/chainNames.js";
+import { formatBalanceLines } from "../utils/balanceText.js";
 const router = express.Router();
 
 // Environment configuration (Replace with environment variables in production)
@@ -1615,13 +1616,11 @@ router.post("/callback", async (req, res) => {
 
                     let balanceText = `Hi${withName(me)} 👋\n\n💼 *Your Wallet Balances*\n\n`;
 
-                    if (!balances || balances.length === 0) {
-                      balanceText += "You currently have no wallet balances.\n";
-                    } else {
-                      for (const bal of balances) {
-                        balanceText += `• ${bal.coin}: ${bal.balance}\n`;
-                      }
-                    }
+                    // Per network, so it matches what can be withdrawn where.
+                    const lines = formatBalanceLines(balances);
+                    balanceText += lines
+                      ? `${lines}\n`
+                      : "You currently have no wallet balances.\n";
 
                     balanceText += `\n📅 Last updated: ${formattedDate}`;
 
@@ -5681,9 +5680,7 @@ async function routeToFlow(flow, from, phone_number_id, sessionData) {
         year: "numeric",
       });
       let balanceText = `Hi${withName(me)} 👋\n\n💼 *Your Wallet Balances*\n\n`;
-      balanceText += balances?.length
-        ? balances.map((b) => `• ${b.coin}: ${b.balance}`).join("\n")
-        : "You currently have no wallet balances.";
+      balanceText += formatBalanceLines(balances) || "You currently have no wallet balances.";
       balanceText += `\n\n📅 Last updated: ${formattedDate}`;
       await sendWhatsApp(from, balanceText, phone_number_id);
       await sendMainMenu(from, phone_number_id);
