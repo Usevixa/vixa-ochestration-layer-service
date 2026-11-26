@@ -1,5 +1,9 @@
 // node tests/withdrawalQuote.unit.mjs
-import { buildWithdrawalQuoteText } from "../src/utils/withdrawalQuote.js";
+import {
+  buildWithdrawalQuoteText,
+  isQuoteExpiredError,
+  isWithdrawalQuoteStale,
+} from "../src/utils/withdrawalQuote.js";
 
 let failed = 0;
 const check = (label, ok, got) => {
@@ -28,6 +32,22 @@ check("shortfall doesn't ask to proceed", !/proceed/.test(short), short);
 
 const noChain = buildWithdrawalQuoteText({ coin: "USDT", totalDebit: 5 }, { network: "polygon" });
 check("falls back to session network + old field", /Network: Polygon \(POS\)/.test(noChain) && /Withdrawing: 5 USDT/.test(noChain), noChain);
+
+// Execute errors that a fresh quote fixes.
+check("expired/used → refresh", isQuoteExpiredError({ message: "This quote has expired or has already been used. Get a new quote." }), "");
+check("mismatch → refresh", isQuoteExpiredError({ message: "The coin, chain and amount do not match this quote. Get a new quote." }), "");
+check("invalid PIN → not refresh", !isQuoteExpiredError({ message: "Invalid PIN" }), "");
+check("transport string → not refresh", !isQuoteExpiredError("timeout of 30000ms exceeded"), "");
+check("null → not refresh", !isQuoteExpiredError(null), "");
+
+// Stale check before the PIN.
+const now = Date.parse("2026-11-26T10:00:00Z");
+const old = now - 5 * 60_000;
+check("expired → stale", isWithdrawalQuoteStale({ quoteExpiresAt: "2026-11-26T09:59:00Z", quoteFetchedAt: old }, now), "");
+check("20s left → stale", isWithdrawalQuoteStale({ quoteExpiresAt: "2026-11-26T10:00:20Z", quoteFetchedAt: old }, now), "");
+check("2 min left → fresh", !isWithdrawalQuoteStale({ quoteExpiresAt: "2026-11-26T10:02:00Z", quoteFetchedAt: old }, now), "");
+check("no expiry → not stale", !isWithdrawalQuoteStale({ quoteFetchedAt: old }, now), "");
+check("just fetched → never stale (clock skew)", !isWithdrawalQuoteStale({ quoteExpiresAt: "2026-11-26T09:59:00Z", quoteFetchedAt: now - 5_000 }, now), "");
 
 console.log(`\n${failed ? "some" : "all"} checks: ${failed} failed`);
 process.exit(failed ? 1 : 0);

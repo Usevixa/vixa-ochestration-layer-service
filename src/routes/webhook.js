@@ -51,7 +51,11 @@ import {
   getWithdrawalAssets,
 } from "../services/withdrawal.service.js";
 import { formatCryptoAmount } from "../utils/withdrawalAssets.js";
-import { buildWithdrawalQuoteText } from "../utils/withdrawalQuote.js";
+import {
+  buildWithdrawalQuoteText,
+  isQuoteExpiredError,
+  isWithdrawalQuoteStale,
+} from "../utils/withdrawalQuote.js";
 import { confirmPayment } from "../services/confirmPayment.service.js";
 import {
   fetchSendQuote,
@@ -2031,21 +2035,28 @@ router.post("/callback", async (req, res) => {
                 return;
               }
 
-              if (actionId === "ACCOUNT_CONFIRM_YES") {
+              // Bank details confirmed (ACCOUNT_CONFIRM_YES) or a refreshed
+              // quote accepted (REQUOTE_CONFIRM_YES). Quotes expire while the
+              // user picks a bank and types the account, so refresh an
+              // expired one here instead of letting execute fail.
+              if (
+                actionId === "ACCOUNT_CONFIRM_YES" ||
+                actionId === "REQUOTE_CONFIRM_YES"
+              ) {
+                const w = session.data.withdraw || {};
+                if (isWithdrawalQuoteStale(w)) {
+                  await requestWithdrawalQuote(from, phone_number_id, w.amount, {
+                    refresh: true,
+                  });
+                  return;
+                }
+
                 await updateSession(from, {
                   data: {
                     ...session.data,
-                    withdraw: {
-                      ...session.data.withdraw,
-                      step: "ENTER_EXECUTE_PIN",
-                    },
+                    withdraw: { ...w, step: "ENTER_EXECUTE_PIN" },
                   },
                 });
-                // await sendWhatsApp(
-                //   from,
-                //   "🔐 Enter your *4-digit PIN* to execute this withdrawal:",
-                //   phone_number_id,
-                // );
                 await triggerPinFlow(from, phone_number_id, "WITHDRAW_EXECUTE");
                 return;
               }
@@ -4552,6 +4563,15 @@ async function handlePinFlowSubmission({
       });
 
       if (!execRes.success) {
+        // Quote expired (or no longer matches): keep coin, chain, amount,
+        // bank and account, get a fresh quote, and let the user confirm it.
+        if (isQuoteExpiredError(execRes.error)) {
+          await requestWithdrawalQuote(phone, phone_number_id, amount, {
+            refresh: true,
+          });
+          return;
+        }
+
         await sendWhatsApp(
           phone,
           `⚠️ ${withdrawalErrorMessage(execRes.error)}`,
@@ -5412,8 +5432,12 @@ function withdrawalErrorMessage(error) {
  *   ok                       → quote + [Yes, Proceed] [Cancel]
  *   400 hasEnoughBalance:false → quote with the shortfall, ask a new amount
  *   any other error          → the backend's message, back to the menu
+ *
+ * refresh: the old quote expired after the bank and account were set. The
+ * new quote is shown as "updated" and its Yes goes straight to the PIN
+ * (REQUOTE_CONFIRM_YES) instead of back to the bank list.
  */
-async function requestWithdrawalQuote(to, phone_number_id, amount) {
+async function requestWithdrawalQuote(to, phone_number_id, amount, { refresh = false } = {}) {
   const session = await getSession(to);
   const w = session.data.withdraw || {};
 
@@ -5460,11 +5484,15 @@ async function requestWithdrawalQuote(to, phone_number_id, amount) {
         // Execute needs both. The key is made once per quote so a retried or
         // double-tapped execute is the same withdrawal.
         quoteId: q.quoteId ?? null,
+        quoteExpiresAt: q.quoteExpiresAt || q.expiresAt || null,
+        quoteFetchedAt: Date.now(),
         idempotencyKey: `WITHDRAW-${randomUUID()}`,
-        step: "AWAITING_QUOTE_CONFIRM",
+        step: refresh ? "AWAITING_REQUOTE_CONFIRM" : "AWAITING_QUOTE_CONFIRM",
       },
     },
   });
+
+  const quoteText = buildWithdrawalQuoteText(q, { network: w.network });
 
   await sendWhatsApp(
     to,
@@ -5472,10 +5500,16 @@ async function requestWithdrawalQuote(to, phone_number_id, amount) {
       type: "interactive",
       interactive: {
         type: "button",
-        body: { text: buildWithdrawalQuoteText(q, { network: w.network }) },
+        body: {
+          text: refresh
+            ? `⏳ Your previous quote expired. Here's the updated one 👇\n\n${quoteText}`
+            : quoteText,
+        },
         action: {
           buttons: [
-            { type: "reply", reply: { id: "QUOTE_CONFIRM_YES", title: "Yes, Proceed" } },
+            refresh
+              ? { type: "reply", reply: { id: "REQUOTE_CONFIRM_YES", title: "Yes, Withdraw" } }
+              : { type: "reply", reply: { id: "QUOTE_CONFIRM_YES", title: "Yes, Proceed" } },
             { type: "reply", reply: { id: "WITHDRAW_CANCEL", title: "Cancel" } },
           ],
         },

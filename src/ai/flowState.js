@@ -274,6 +274,13 @@ export function describeFlowState(sessionData) {
           "In the WITHDRAW flow. A quote has been shown and we are waiting for the user to accept or reject it.",
         rePrompt: "Please tap *Yes* or *No* above to continue.",
       },
+      AWAITING_REQUOTE_CONFIRM: {
+        expecting: "confirmation",
+        committed: true,
+        describe:
+          "In the WITHDRAW flow. The earlier quote expired; an updated quote has been shown and we are waiting for the user to accept it before the PIN.",
+        rePrompt: "Please tap *Yes, Withdraw* or *Cancel* on the updated quote above.",
+      },
       AWAITING_ACCOUNT_CONFIRM: {
         expecting: "confirmation",
         committed: true,
