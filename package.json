@@ -4,7 +4,7 @@
   "main": "index.js",
   "type": "module",
   "scripts": {
-    "test": "npm run test:intent && npm run test:shape && npm run test:chains && npm run test:balance && npm run test:names && npm run test:assets && npm run test:withdraw-assets && npm run test:withdraw-quote && npm run test:security && npm run test:webhook && npm run test:token-isolation",
+    "test": "npm run test:intent && npm run test:shape && npm run test:chains && npm run test:balance && npm run test:names && npm run test:assets && npm run test:withdraw-assets && npm run test:withdraw-quote && npm run test:quote-expiry && npm run test:security && npm run test:webhook && npm run test:token-isolation",
     "test:intent": "node tests/intent.unit.mjs",
     "test:shape": "node tests/apiShape.unit.mjs",
     "test:balance": "node tests/balanceText.unit.mjs",
@@ -13,6 +13,7 @@
     "test:assets": "node tests/depositAssets.unit.mjs",
     "test:withdraw-assets": "node tests/withdrawalAssets.unit.mjs",
     "test:withdraw-quote": "node tests/withdrawalQuote.unit.mjs",
+    "test:quote-expiry": "node tests/quoteExpiry.unit.mjs",
     "test:security": "node tests/webhookSecurity.unit.mjs",
     "test:webhook": "node -r dotenv/config tests/webhook.integration.mjs",
     "test:token-isolation": "node -r dotenv/config tests/tokenIsolation.integration.mjs",

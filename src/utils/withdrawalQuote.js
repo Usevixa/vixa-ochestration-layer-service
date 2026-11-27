@@ -1,4 +1,5 @@
 import { chainLabel } from "./chainNames.js";
+import { isQuoteExpiredError, isQuoteStale } from "./quoteExpiry.js";
 
 /**
  * Quote message for POST /withdrawal/quote. Response `data`:
@@ -73,27 +74,9 @@ export function buildWithdrawalQuoteText(q = {}, { network, ask = true } = {}) {
   return `📊 *Withdrawal Quote*\n\n${lines.join("\n")}${tail}`;
 }
 
-/**
- * Execute errors a fresh quote fixes:
- *   "This quote has expired or has already been used. Get a new quote."
- *   "The coin, chain and amount do not match this quote. Get a new quote."
- * A fresh quote needs the user's confirmation and PIN again, and execute
- * gets a new idempotency key, so nothing goes through without them.
- */
-export function isQuoteExpiredError(error) {
-  const m = error && typeof error === "object" ? String(error.message || "") : "";
-  return /expired|get a new quote/i.test(m);
-}
+export { isQuoteExpiredError };
 
-/**
- * True when the stored quote has expired or is about to (under 30s left),
- * so asking for the PIN now would most likely end in "quote expired".
- * A quote fetched in the last 15s is never stale, so a server clock ahead
- * of ours can't loop the user through refresh after refresh.
- */
+/** isQuoteStale for the withdraw session ({ quoteExpiresAt, quoteFetchedAt }). */
 export function isWithdrawalQuoteStale(w = {}, now = Date.now()) {
-  const expires = Date.parse(w.quoteExpiresAt || "");
-  if (!Number.isFinite(expires)) return false; // unknown: execute will tell us
-  if (w.quoteFetchedAt && now - w.quoteFetchedAt < 15_000) return false;
-  return expires - now < 30_000;
+  return isQuoteStale(w.quoteExpiresAt, w.quoteFetchedAt, now);
 }
