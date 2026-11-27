@@ -56,6 +56,7 @@ import {
   isQuoteExpiredError,
   isWithdrawalQuoteStale,
 } from "../utils/withdrawalQuote.js";
+import { isQuoteStale, QUOTE_REFRESHED_PREFIX } from "../utils/quoteExpiry.js";
 import { confirmPayment } from "../services/confirmPayment.service.js";
 import {
   fetchSendQuote,
@@ -901,62 +902,7 @@ router.post("/callback", async (req, res) => {
                 //   return;
                 // }
 
-                const quote = await fetchSwapQuote({
-                  fromCoin: session.data.swap.fromCoin,
-                  toCoin,
-                  fromAmount: amount,
-                });
-
-                console.log(quote, "qouteres");
-
-                if (!quote.success) {
-                  const rawError = quote.error?.message || "Unknown server error";
-                  const friendlyMessage = await humanizeError(
-                    rawError,
-                    "get a swap quote",
-                  );
-                  await sendWhatsApp(from, friendlyMessage, phone_number_id);
-                  return;
-                }
-
-                // await sendWhatsApp(
-                //   from,
-                //   `🔄 *Swap Quote*\n\nFrom: ${amount} ${session.data.swap.fromCoin}\nTo: ${quote.data.data.toAmount} ${toCoin}\nFee: ${quote.data.data.fee}`,
-                //   phone_number_id,
-                // );
-
-                await updateSession(from, {
-                  data: {
-                    ...session.data,
-                    swap: {
-                      ...session.data.swap,
-                      step: "AWAITING_SWAP_CONFIRM",
-                      toCoin,
-                      quote: quote.data.data,
-                      quoteId: quote.data.data?.quoteId ?? null,
-                    },
-                  },
-                });
-
-                await sendWhatsApp(
-                  from,
-                  {
-                    type: "interactive",
-                    interactive: {
-                      type: "button",
-                      body: {
-                        text: buildSwapQuoteText(quote.data.data, { amount, fromCoin: session.data.swap.fromCoin, toCoin }),
-                      },
-                      action: {
-                        buttons: [
-                          { type: "reply", reply: { id: "SWAP_CONFIRM_YES", title: "Yes, Swap" } },
-                          { type: "reply", reply: { id: "SWAP_CANCEL", title: "Cancel" } },
-                        ],
-                      },
-                    },
-                  },
-                  phone_number_id,
-                );
+                await requestSwapQuote(from, phone_number_id, toCoin);
                 return;
               }
 
@@ -1896,6 +1842,13 @@ router.post("/callback", async (req, res) => {
                   await sendMainMenu(from, phone_number_id);
                   return;
                 }
+                // Expired (or nearly): show a fresh quote instead of a PIN
+                // that would only fail.
+                const sd = session.data.send;
+                if (isQuoteStale(sd.quote?.expiresAt, sd.quoteFetchedAt)) {
+                  await requestSendQuote(from, phone_number_id, { refresh: true });
+                  return;
+                }
                 await updateSession(from, {
                   data: {
                     ...session.data,
@@ -1923,6 +1876,15 @@ router.post("/callback", async (req, res) => {
                     phone_number_id,
                   );
                   await sendMainMenu(from, phone_number_id);
+                  return;
+                }
+                // Expired (or nearly): show a fresh quote instead of a PIN
+                // that would only fail.
+                const s = session.data.swap;
+                if (isQuoteStale(s.quote?.expiresAt, s.quoteFetchedAt)) {
+                  await requestSwapQuote(from, phone_number_id, s.toCoin, {
+                    refresh: true,
+                  });
                   return;
                 }
                 await updateSession(from, {
@@ -2661,69 +2623,15 @@ router.post("/callback", async (req, res) => {
                   return;
                 }
 
-                // External: quote first, then confirm, then PIN.
-                const { coin, amount, chain } = session.data.send;
-                const quoteRes = await fetchSendQuote({
-                  coin,
-                  chain: chain?.chain,
-                  amount,
-                  externalAddress: address,
-                });
-
-                if (!quoteRes.success || !quoteRes.data?.data?.quoteId) {
-                  const rawError =
-                    quoteRes.error?.message || "Unknown server error";
-                  const friendly = await humanizeError(
-                    rawError,
-                    "get a send quote",
-                  );
-                  await sendWhatsApp(from, friendly, phone_number_id);
-                  await updateSession(from, {
-                    data: { ...session.data, send: null },
-                  });
-                  await sendMainMenu(from, phone_number_id);
-                  return;
-                }
-
-                const q = quoteRes.data.data;
+                // External: quote first, then confirm, then PIN. The address
+                // is saved first so a refreshed quote can reuse it.
                 await updateSession(from, {
                   data: {
                     ...session.data,
-                    send: {
-                      ...session.data.send,
-                      address,
-                      quote: q,
-                      quoteId: q.quoteId,
-                      // Made once per quote so a retried execute is the same send.
-                      idempotencyKey: `SEND-${randomUUID()}`,
-                      step: "AWAITING_SEND_CONFIRM",
-                    },
+                    send: { ...session.data.send, address },
                   },
                 });
-
-                await sendWhatsApp(
-                  from,
-                  {
-                    type: "interactive",
-                    interactive: {
-                      type: "button",
-                      body: { text: buildSendQuoteText(q, address) },
-                      action: {
-                        buttons: [
-                          {
-                            type: "reply",
-                            reply: { id: "SEND_CONFIRM_YES", title: "Yes, Send" },
-                          },
-                          {
-                            type: "reply",
-                            reply: { id: "SEND_CANCEL", title: "Cancel" },
-                          },
-                        ],
-                      },
-                    },
-                  },
-                  phone_number_id,
-                );
+                await requestSendQuote(from, phone_number_id);
                 return;
               }
 
@@ -4456,6 +4364,12 @@ async function handlePinFlowSubmission({
       });
 
       if (!swapResult.success) {
+        // Quote expired between confirm and PIN: keep the coins and amount,
+        // get a fresh quote and let the user confirm it.
+        if (isQuoteExpiredError(swapResult.error)) {
+          await requestSwapQuote(phone, phone_number_id, toCoin, { refresh: true });
+          return;
+        }
         const rawError = swapResult.error?.message || "Unknown server error";
         const friendly = await humanizeError(rawError, "execute a crypto swap");
         await sendWhatsApp(phone, friendly, phone_number_id);
@@ -4498,6 +4412,13 @@ async function handlePinFlowSubmission({
       });
 
       if (!sendRes.success) {
+        // External send whose quote expired: keep coin, chain, amount and
+        // address, get a fresh quote (new idempotency key) and let the user
+        // confirm it. P2P has no quote.
+        if (type !== "P2P" && isQuoteExpiredError(sendRes.error)) {
+          await requestSendQuote(phone, phone_number_id, { refresh: true });
+          return;
+        }
         const rawError = sendRes.error?.message || "Unknown server error";
         const friendly = await humanizeError(rawError, "send crypto");
         await sendWhatsApp(phone, friendly, phone_number_id);
@@ -4875,54 +4796,7 @@ async function handleItemSelection({
 
     // ── SWAP: to-coin ────────────────────────────────
     case "SWAP_TO": {
-      const toCoin = selectedId;
-      const { amount, fromCoin } = session.data?.swap || {};
-
-      const quote = await fetchSwapQuote({
-        fromCoin,
-        toCoin,
-        fromAmount: amount,
-      });
-
-      if (!quote.success) {
-        const rawError = quote.error?.message || "Unknown server error";
-        const friendly = await humanizeError(rawError, "get a swap quote");
-        await sendWhatsApp(phone, friendly, phone_number_id);
-        return;
-      }
-
-      await updateSession(phone, {
-        data: {
-          ...session.data,
-          swap: {
-            ...session.data.swap,
-            step: "AWAITING_SWAP_CONFIRM",
-            toCoin,
-            quote: quote.data.data,
-            quoteId: quote.data.data?.quoteId ?? null,
-          },
-        },
-      });
-
-      await sendWhatsApp(
-        phone,
-        {
-          type: "interactive",
-          interactive: {
-            type: "button",
-            body: {
-              text: buildSwapQuoteText(quote.data.data, { amount, fromCoin: fromCoin, toCoin }),
-            },
-            action: {
-              buttons: [
-                { type: "reply", reply: { id: "SWAP_CONFIRM_YES", title: "Yes, Swap" } },
-                { type: "reply", reply: { id: "SWAP_CANCEL", title: "Cancel" } },
-              ],
-            },
-          },
-        },
-        phone_number_id,
-      );
+      await requestSwapQuote(phone, phone_number_id, selectedId);
       return;
     }
 
@@ -5511,6 +5385,131 @@ async function requestWithdrawalQuote(to, phone_number_id, amount, { refresh = f
               ? { type: "reply", reply: { id: "REQUOTE_CONFIRM_YES", title: "Yes, Withdraw" } }
               : { type: "reply", reply: { id: "QUOTE_CONFIRM_YES", title: "Yes, Proceed" } },
             { type: "reply", reply: { id: "WITHDRAW_CANCEL", title: "Cancel" } },
+          ],
+        },
+      },
+    },
+    phone_number_id,
+  );
+}
+
+/**
+ * GET /swap/quote for the from-coin and amount in the session and show it
+ * with Yes, Swap / Cancel.
+ *
+ * refresh: the old quote expired (caught on Yes, Swap or by execute). The
+ * new quote is shown as "updated"; if it can't be fetched the swap ends.
+ */
+async function requestSwapQuote(to, phone_number_id, toCoin, { refresh = false } = {}) {
+  const session = await getSession(to);
+  const s = session.data?.swap || {};
+  const { amount, fromCoin } = s;
+
+  const quote = await fetchSwapQuote({ fromCoin, toCoin, fromAmount: amount });
+
+  if (!quote.success) {
+    const rawError = quote.error?.message || "Unknown server error";
+    const friendly = await humanizeError(rawError, "get a swap quote");
+    await sendWhatsApp(to, friendly, phone_number_id);
+    if (refresh) {
+      await updateSession(to, { data: { ...session.data, swap: null } });
+      await sendMainMenu(to, phone_number_id);
+    }
+    return;
+  }
+
+  const q = quote.data?.data || {};
+  await updateSession(to, {
+    data: {
+      ...session.data,
+      swap: {
+        ...s,
+        step: "AWAITING_SWAP_CONFIRM",
+        toCoin,
+        quote: q,
+        quoteId: q.quoteId ?? null,
+        quoteFetchedAt: Date.now(),
+      },
+    },
+  });
+
+  const text = buildSwapQuoteText(q, { amount, fromCoin, toCoin });
+  await sendWhatsApp(
+    to,
+    {
+      type: "interactive",
+      interactive: {
+        type: "button",
+        body: { text: refresh ? QUOTE_REFRESHED_PREFIX + text : text },
+        action: {
+          buttons: [
+            { type: "reply", reply: { id: "SWAP_CONFIRM_YES", title: "Yes, Swap" } },
+            { type: "reply", reply: { id: "SWAP_CANCEL", title: "Cancel" } },
+          ],
+        },
+      },
+    },
+    phone_number_id,
+  );
+}
+
+/**
+ * POST /crypto/send/quote for the coin, chain, amount and address in the
+ * session (external sends only; P2P has no quote) and show it with
+ * Yes, Send / Cancel. Every quote gets its own idempotency key.
+ *
+ * refresh: the old quote expired (caught on Yes, Send or by execute). The
+ * new quote is shown as "updated".
+ */
+async function requestSendQuote(to, phone_number_id, { refresh = false } = {}) {
+  const session = await getSession(to);
+  const send = session.data?.send || {};
+  const { coin, amount, chain, address } = send;
+
+  const quoteRes = await fetchSendQuote({
+    coin,
+    chain: chain?.chain,
+    amount,
+    externalAddress: address,
+  });
+
+  if (!quoteRes.success || !quoteRes.data?.data?.quoteId) {
+    const rawError = quoteRes.error?.message || "Unknown server error";
+    const friendly = await humanizeError(rawError, "get a send quote");
+    await sendWhatsApp(to, friendly, phone_number_id);
+    await updateSession(to, { data: { ...session.data, send: null } });
+    await sendMainMenu(to, phone_number_id);
+    return;
+  }
+
+  const q = quoteRes.data.data;
+  await updateSession(to, {
+    data: {
+      ...session.data,
+      send: {
+        ...send,
+        quote: q,
+        quoteId: q.quoteId,
+        quoteFetchedAt: Date.now(),
+        // Made once per quote so a retried execute is the same send.
+        idempotencyKey: `SEND-${randomUUID()}`,
+        step: "AWAITING_SEND_CONFIRM",
+      },
+    },
+  });
+
+  const text = buildSendQuoteText(q, address);
+  await sendWhatsApp(
+    to,
+    {
+      type: "interactive",
+      interactive: {
+        type: "button",
+        body: { text: refresh ? QUOTE_REFRESHED_PREFIX + text : text },
+        action: {
+          buttons: [
+            { type: "reply", reply: { id: "SEND_CONFIRM_YES", title: "Yes, Send" } },
+            { type: "reply", reply: { id: "SEND_CANCEL", title: "Cancel" } },
           ],
         },
       },
